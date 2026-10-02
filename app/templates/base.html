@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="{% block meta_description %}QuizBlitz — Challenge yourself with fun, timed quizzes across dozens of topics.{% endblock %}" />
+  <title>{% block title %}QuizBlitz{% endblock %} — QuizBlitz</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+  <!-- ── Navigation ─────────────────────────────────────────────── -->
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="nav-inner">
+
+      <!-- Brand -->
+      <a href="{{ url_for('quiz.lobby') }}" class="nav-brand" aria-label="QuizBlitz home">
+        <span class="nav-logo">⚡</span>
+        <span>QuizBlitz</span>
+      </a>
+
+      <!-- Links -->
+      <ul class="nav-links" role="list">
+        {% if current_user.is_authenticated %}
+          <li>
+            <a href="{{ url_for('quiz.lobby') }}"
+               class="nav-link {% if request.blueprint == 'quiz' %}nav-link--active{% endif %}">
+              Quizzes
+            </a>
+          </li>
+
+          {% if current_user.is_admin %}
+          <li>
+            <a href="{{ url_for('admin.dashboard') }}"
+               class="nav-link {% if request.blueprint == 'admin' %}nav-link--active{% endif %}">
+              Admin
+            </a>
+          </li>
+          {% endif %}
+
+          <li class="nav-user">
+            <span class="nav-avatar" aria-hidden="true">
+              {{ current_user.username[0].upper() }}
+            </span>
+            <span class="nav-username">{{ current_user.username }}</span>
+          </li>
+          <li>
+            <a href="{{ url_for('auth.logout') }}" class="btn btn--ghost btn--sm">
+              Log Out
+            </a>
+          </li>
+        {% else %}
+          <li><a href="{{ url_for('auth.login') }}" class="nav-link">Log In</a></li>
+          <li>
+            <a href="{{ url_for('auth.register') }}" class="btn btn--primary btn--sm">
+              Sign Up
+            </a>
+          </li>
+        {% endif %}
+      </ul>
+
+    </div>
+  </nav>
+
+  <!-- ── Flash messages ─────────────────────────────────────────── -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-container" role="alert" aria-live="polite">
+        {% for category, message in messages %}
+          <div class="flash flash--{{ category }}">
+            <span class="flash-icon">
+              {% if category == 'success' %}✓{% elif category == 'danger' %}✗{% elif category == 'warning' %}⚠{% else %}ℹ{% endif %}
+            </span>
+            {{ message }}
+            <button class="flash-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- ── Page content ───────────────────────────────────────────── -->
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- ── Footer ─────────────────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <span>© 2025 QuizBlitz</span>
+      <span class="footer-sep">·</span>
+      <span>Built for curious minds ⚡</span>
+    </div>
+  </footer>
+
+  <!-- Base JS (flash auto-dismiss) -->
+  <script>
+    // Auto-dismiss flash messages after 5 s
+    document.querySelectorAll(".flash").forEach(el => {
+      setTimeout(() => el.remove(), 5000);
+    });
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="lobby-layout">
+  <div class="card qr-card">
+    <h2>Join Code: <strong>{{ session.session_code }}</strong></h2>
+    {% if session.qr_b64 %}
+      <img src="data:image/png;base64,{{ session.qr_b64 }}" alt="QR code for session" class="qr-code" />
+    {% endif %}
+    <div class="lobby-actions">
+      <form action="{{ url_for('master.start_session', code=session.session_code) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn--primary" type="submit">Start quiz</button>
+      </form>
+      <form action="{{ url_for('master.reveal_answer', code=session.session_code) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn--warning" type="submit">Reveal answer</button>
+      </form>
+      <form action="{{ url_for('master.next_question', code=session.session_code) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn--secondary" type="submit">Next</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card roster-card">
+    <h2>Teams</h2>
+    <ul class="team-list">
+      {% for team in teams %}
+        <li>{{ team.team_name }}</li>
+      {% else %}
+        <li>No teams joined yet.</li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Your Results{% endblock %}
+{% block meta_description %}See how you scored on {{ quiz.title }} — review every answer.{% endblock %}
+
+{% block content %}
+<section class="results-page">
+
+  <!-- Score Ring Card -->
+  <div class="results-hero card">
+    <h1 class="results-title">Quiz Complete! 🎉</h1>
+    <p class="results-quiz-name">{{ quiz.title }}</p>
+
+    <!-- SVG ring -->
+    <div class="score-ring-wrap" aria-label="Score: {{ attempt.percentage }}%">
+      <svg class="score-ring" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="60" cy="60" r="50" class="ring-track" />
+        <circle cx="60" cy="60" r="50" class="ring-fill"
+                id="ring-fill"
+                style="stroke-dasharray: 314; stroke-dashoffset: {{ (314 * (1 - attempt.percentage / 100)) | round(2) }};" />
+      </svg>
+      <div class="score-ring-text">
+        <span class="score-pct" id="score-pct">{{ attempt.percentage | int }}%</span>
+        <span class="score-pts">{{ attempt.score }}/{{ attempt.total_points }}</span>
+      </div>
+    </div>
+
+    <!-- Stat chips -->
+    <div class="result-stats">
+      <div class="result-stat">
+        <span class="result-stat__icon">✅</span>
+        <span class="result-stat__val">{{ attempt.score }}</span>
+        <span class="result-stat__label">Correct</span>
+      </div>
+      <div class="result-stat">
+        <span class="result-stat__icon">❌</span>
+        <span class="result-stat__val">{{ attempt.total_points - attempt.score }}</span>
+        <span class="result-stat__label">Wrong</span>
+      </div>
+      <div class="result-stat">
+        <span class="result-stat__icon">⏱</span>
+        <span class="result-stat__val">{{ format_time(attempt.time_taken_seconds) }}</span>
+        <span class="result-stat__label">Time</span>
+      </div>
+    </div>
+
+    <!-- CTAs -->
+    <div class="results-actions">
+      <a href="{{ url_for('quiz.start', quiz_id=quiz.id) }}"
+         class="btn btn--primary" id="play-again-btn">Play Again</a>
+      <a href="{{ url_for('quiz.leaderboard', quiz_id=quiz.id) }}"
+         class="btn btn--ghost" id="leaderboard-btn">🏆 Leaderboard</a>
+    </div>
+  </div>
+
+  <!-- Answer Review -->
+  <div class="review-section">
+    <h2 class="review-heading">Answer Review</h2>
+
+    {% for item in review %}
+      {% set q = item.question %}
+      {% set correct = item.correct_option %}
+      <div class="review-card card">
+        <div class="review-q-header">
+          <span class="review-q-num">Q{{ loop.index }}</span>
+          <p class="review-q-text">{{ q.text }}</p>
+        </div>
+        <div class="review-options">
+          {% for opt in q.options %}
+            <div class="review-option
+                        {% if opt.is_correct %}review-option--correct{% endif %}">
+              <span class="review-option-icon">
+                {% if opt.is_correct %}✓{% endif %}
+              </span>
+              {{ opt.text }}
+            </div>
+          {% endfor %}
+        </div>
+        <p class="review-correct-label">
+          Correct answer: <strong>{{ correct.text if correct else "N/A" }}</strong>
+        </p>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="results-back">
+    <a href="{{ url_for('quiz.lobby') }}" class="btn btn--ghost">← Back to Lobby</a>
+  </div>
+
+</section>
+{% endblock %}

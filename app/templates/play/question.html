@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="game-screen">
+  <div class="card question-card">
+    <div class="question-meta">
+      <span class="badge">Round <span id="round-number">1</span></span>
+      <span class="badge badge--muted">Question <span id="question-number">1</span></span>
+    </div>
+    <h1 id="question-text">Waiting for the next question...</h1>
+    <div id="option-list" class="option-list"></div>
+    <p id="status-message" class="status-message">Waiting for game to begin.</p>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+  const sessionCode = "{{ session_code }}";
+  const teamId = {{ team_id }};
+  const socket = io();
+  socket.emit('join_room', { session_code: sessionCode, team_name: '{{ team.team_name }}' });
+
+  socket.on('question_pushed', (payload) => {
+    document.getElementById('question-text').textContent = payload.question_text;
+    document.getElementById('round-number').textContent = payload.round;
+    document.getElementById('question-number').textContent = payload.question_num;
+    const list = document.getElementById('option-list');
+    list.innerHTML = '';
+    payload.options.forEach((option) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'answer-option';
+      button.textContent = option.text;
+      button.addEventListener('click', () => {
+        socket.emit('submit_answer', { session_code: sessionCode, team_id: teamId, option_id: option.id });
+        document.querySelectorAll('.answer-option').forEach((btn) => btn.disabled = true);
+        document.getElementById('status-message').textContent = 'Answer submitted!';
+      });
+      list.appendChild(button);
+    });
+  });
+
+  socket.on('answer_revealed', (payload) => {
+    const buttons = document.querySelectorAll('.answer-option');
+    buttons.forEach((btn) => {
+      btn.disabled = true;
+      const isCorrect = Number(btn.dataset.optionId) === payload.correct_option_id;
+      if (isCorrect) btn.classList.add('is-correct');
+    });
+    document.getElementById('status-message').textContent = `Correct answer: ${payload.correct_option_text}`;
+  });
+</script>
+{% endblock %}

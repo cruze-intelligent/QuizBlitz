@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Log In{% endblock %}
+{% block meta_description %}Log in to your QuizBlitz account and start playing.{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+  <div class="auth-card card">
+
+    <div class="auth-header">
+      <div class="auth-icon">⚡</div>
+      <h1 class="auth-title">Welcome back</h1>
+      <p class="auth-subtitle">Log in to continue your quizzing journey</p>
+    </div>
+
+    <form method="POST" action="{{ url_for('auth.login') }}" novalidate id="login-form">
+      {{ form.hidden_tag() }}  {# CSRF token #}
+
+      <!-- Email -->
+      <div class="form-group {% if form.email.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.email.id }}">Email address</label>
+        {{ form.email(class="form-input", id=form.email.id, placeholder="you@example.com",
+                      autocomplete="email") }}
+        {% for error in form.email.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Password -->
+      <div class="form-group {% if form.password.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.password.id }}">Password</label>
+        {{ form.password(class="form-input", id=form.password.id, placeholder="••••••",
+                         autocomplete="current-password") }}
+        {% for error in form.password.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Remember me -->
+      <div class="form-group form-group--inline">
+        {{ form.remember_me(id=form.remember_me.id) }}
+        <label for="{{ form.remember_me.id }}" class="form-label form-label--inline">
+          Keep me logged in
+        </label>
+      </div>
+
+      {{ form.submit(class="btn btn--primary btn--full", id="login-submit") }}
+    </form>
+
+    <p class="auth-footer-text">
+      Don't have an account?
+      <a href="{{ url_for('auth.register') }}" class="link">Sign up for free</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}

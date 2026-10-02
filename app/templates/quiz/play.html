@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }}{% endblock %}
+{% block meta_description %}Play {{ quiz.title }} — answer all questions before the timer runs out!{% endblock %}
+
+{% block content %}
+<section class="play-page">
+
+  <!-- Quiz Header -->
+  <div class="play-header">
+    <div class="play-header__meta">
+      <span class="pill pill--category">{{ quiz.category }}</span>
+      <span class="badge badge--{{ quiz.difficulty }}">{{ quiz.difficulty | title }}</span>
+    </div>
+    <h1 class="play-header__title">{{ quiz.title }}</h1>
+
+    <!-- Timer bar -->
+    <div class="timer-bar"
+         id="timer-bar"
+         data-seconds="{{ quiz.time_limit_seconds }}"
+         role="timer"
+         aria-label="Time remaining"
+         aria-live="polite">
+      <div class="timer-bar__track">
+        <div class="timer-bar__fill" id="timer-fill"></div>
+      </div>
+      <div class="timer-display" id="timer-display">
+        {% set mins = quiz.time_limit_seconds // 60 %}
+        {% set secs = quiz.time_limit_seconds % 60 %}
+        {{ '%02d' % mins }}:{{ '%02d' % secs }}
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-row">
+      <span class="progress-label" id="progress-label">Question 1 of {{ quiz.question_count }}</span>
+      <div class="progress-track" role="progressbar" aria-valuemin="0"
+           aria-valuemax="{{ quiz.question_count }}" aria-valuenow="1" aria-label="Quiz progress"
+           id="progress-track">
+        <div class="progress-fill" id="progress-fill"
+             style="width: {{ (1 / quiz.question_count * 100) | round(1) }}%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Questions — rendered in the DOM but only one visible at a time via JS -->
+  <form method="POST"
+        action="{{ url_for('quiz.submit', quiz_id=quiz.id) }}"
+        id="quiz-form"
+        novalidate>
+    {# CSRF token — generated manually because this form is not a FlaskForm #}
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    {# Hidden field that JS populates with the JSON answers object #}
+    <input type="hidden" name="answers" id="answers-input" value="{}" />
+
+    <!-- Question slides (hidden by default via CSS; JS reveals them) -->
+    <div class="question-container" id="question-container">
+      <!-- Populated dynamically by quiz.js from the embedded JSON -->
+    </div>
+
+    <!-- Navigation controls -->
+    <div class="quiz-nav" id="quiz-nav">
+      <button type="button" class="btn btn--ghost" id="btn-prev" disabled>
+        ← Previous
+      </button>
+      <button type="button" class="btn btn--primary" id="btn-next">
+        Next →
+      </button>
+      <button type="submit" class="btn btn--success" id="btn-submit" style="display:none">
+        Submit Quiz ✓
+      </button>
+    </div>
+
+  </form>
+
+</section>
+
+<!-- Embed question data for quiz.js — NO is_correct field present -->
+<script id="questions-data" type="application/json">{{ questions_json | safe }}</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/timer.js') }}"></script>
+<script src="{{ url_for('static', filename='js/quiz.js') }}"></script>
+{% endblock %}

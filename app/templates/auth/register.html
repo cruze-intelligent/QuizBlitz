@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Create Account{% endblock %}
+{% block meta_description %}Create your free QuizBlitz account and start playing quizzes today.{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+  <div class="auth-card card">
+
+    <div class="auth-header">
+      <div class="auth-icon">⚡</div>
+      <h1 class="auth-title">Join QuizBlitz</h1>
+      <p class="auth-subtitle">Create a free account and start challenging yourself</p>
+    </div>
+
+    <form method="POST" action="{{ url_for('auth.register') }}" novalidate id="register-form">
+      {{ form.hidden_tag() }}
+
+      <!-- Username -->
+      <div class="form-group {% if form.username.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.username.id }}">Username</label>
+        {{ form.username(class="form-input", id=form.username.id,
+                         placeholder="Pick a cool username",
+                         autocomplete="username") }}
+        {% for error in form.username.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Email -->
+      <div class="form-group {% if form.email.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.email.id }}">Email address</label>
+        {{ form.email(class="form-input", id=form.email.id,
+                      placeholder="you@example.com",
+                      autocomplete="email") }}
+        {% for error in form.email.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Password -->
+      <div class="form-group {% if form.password.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.password.id }}">Password</label>
+        {{ form.password(class="form-input", id=form.password.id,
+                          placeholder="At least 6 characters",
+                          autocomplete="new-password") }}
+        {% for error in form.password.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Confirm Password -->
+      <div class="form-group {% if form.confirm_password.errors %}form-group--error{% endif %}">
+        <label class="form-label" for="{{ form.confirm_password.id }}">Confirm password</label>
+        {{ form.confirm_password(class="form-input", id=form.confirm_password.id,
+                                  placeholder="Repeat your password",
+                                  autocomplete="new-password") }}
+        {% for error in form.confirm_password.errors %}
+          <span class="form-error">{{ error }}</span>
+        {% endfor %}
+      </div>
+
+      {{ form.submit(class="btn btn--primary btn--full", id="register-submit") }}
+    </form>
+
+    <p class="auth-footer-text">
+      Already have an account?
+      <a href="{{ url_for('auth.login') }}" class="link">Log in</a>
+    </p>
+
+  </div>
+</div>
+{% endblock %}

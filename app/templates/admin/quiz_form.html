@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+
+{% macro _render_question(idx, q=None) %}
+<div class="question-block__inner">
+  <div class="question-block__header">
+    <span class="question-block__num">Question {{ idx + 1 }}</span>
+    <button type="button" class="btn btn--danger btn--xs remove-q-btn"
+            onclick="removeQuestion(this)" {% if idx == 0 %}style="visibility:hidden"{% endif %}>
+      Remove
+    </button>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Question text *</label>
+    <textarea class="form-input form-textarea question-text"
+              name="question_text_{{ idx }}"
+              placeholder="Enter your question here…" required>{{ q.text if q else '' }}</textarea>
+  </div>
+
+  <div class="options-grid">
+    {% for o in range(4) %}
+      <div class="option-row">
+        <input type="radio" name="correct_option_{{ idx }}" value="{{ o }}"
+               class="option-radio"
+               id="correct_{{ idx }}_{{ o }}"
+               {{ 'checked' if q and q.options.all()[o].is_correct }}>
+        <label for="correct_{{ idx }}_{{ o }}" class="option-radio-label" title="Mark as correct"></label>
+        <input class="form-input option-text" type="text"
+               name="option_text_{{ idx }}_{{ o }}"
+               value="{{ q.options.all()[o].text if q else '' }}"
+               placeholder="Option {{ o + 1 }}" required />
+      </div>
+    {% endfor %}
+  </div>
+  <p class="option-hint">Select the radio button next to the correct answer.</p>
+</div>
+{% endmacro %}
+
+{% block content %}
+<section class="quiz-form-page">
+
+  <div class="quiz-form-header">
+    <a href="{{ back_url|default(url_for('admin.dashboard')) }}" class="back-link">← Dashboard</a>
+    <h1 class="quiz-form-title">{{ title }}</h1>
+  </div>
+
+  <form method="POST" action="{{ action }}" id="quiz-form" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="question_count" id="question-count" value="{{ quiz.questions.count() if quiz else 1 }}" />
+
+    <!-- ── Quiz Metadata ─────────────────────────────────────────── -->
+    <div class="card quiz-meta-card">
+      <h2 class="section-heading">Quiz Details</h2>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="q-title">Title *</label>
+          <input class="form-input" type="text" id="q-title" name="title"
+                 value="{{ quiz.title if quiz else '' }}"
+                 placeholder="e.g. Science Trivia" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="q-category">Category *</label>
+          <input class="form-input" type="text" id="q-category" name="category"
+                 value="{{ quiz.category if quiz else 'General' }}"
+                 placeholder="e.g. Science" required />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="q-desc">Description</label>
+        <textarea class="form-input form-textarea" id="q-desc" name="description"
+                  placeholder="Short description shown on the quiz card…">{{ quiz.description if quiz else '' }}</textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label" for="q-difficulty">Difficulty *</label>
+          <select class="form-input" id="q-difficulty" name="difficulty">
+            {% for level in ['easy', 'medium', 'hard'] %}
+              <option value="{{ level }}"
+                {{ 'selected' if (quiz and quiz.difficulty == level) or (not quiz and level == 'easy') }}>
+                {{ level | title }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="q-time">Time Limit (seconds) *</label>
+          <input class="form-input" type="number" id="q-time" name="time_limit_seconds"
+                 value="{{ quiz.time_limit_seconds if quiz else 180 }}" min="30" max="3600" />
+        </div>
+        <div class="form-group form-group--checkbox">
+          <input type="checkbox" id="q-published" name="is_published"
+                 {{ 'checked' if quiz and quiz.is_published }} />
+          <label class="form-label form-label--inline" for="q-published">
+            Publish immediately
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Questions ─────────────────────────────────────────────── -->
+    <div id="questions-container">
+      {% if quiz and quiz.questions.count() > 0 %}
+        {% for q in quiz.questions %}
+          <div class="card question-block" data-index="{{ loop.index0 }}">
+            {{ _render_question(loop.index0, q) }}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="card question-block" data-index="0">
+          {{ _render_question(0) }}
+        </div>
+      {% endif %}
+    </div>
+
+    <button type="button" class="btn btn--ghost" id="add-question-btn">+ Add Question</button>
+
+    <div class="form-actions">
+      <a href="{{ back_url|default(url_for('admin.dashboard')) }}" class="btn btn--ghost">Cancel</a>
+      <button type="submit" class="btn btn--primary" id="save-quiz-btn">
+        {{ 'Update Quiz' if quiz else 'Create Quiz' }}
+      </button>
+    </div>
+  </form>
+
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Admin quiz form JS ── */
+
+let questionCount = document.querySelectorAll(".question-block").length;
+const questionCountInput = document.getElementById("question-count");
+
+// Add a new blank question block
+document.getElementById("add-question-btn").addEventListener("click", () => {
+  const idx = questionCount;
+  const container = document.getElementById("questions-container");
+
+  const html = `
+    <div class="card question-block" data-index="${idx}">
+      <div class="question-block__inner">
+        <div class="question-block__header">
+          <span class="question-block__num">Question ${idx + 1}</span>
+          <button type="button" class="btn btn--danger btn--xs remove-q-btn"
+                  onclick="removeQuestion(this)">Remove</button>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Question text *</label>
+          <textarea class="form-input form-textarea question-text"
+                    name="question_text_${idx}"
+                    placeholder="Enter your question here…" required></textarea>
+        </div>
+        <div class="options-grid">
+          ${[0,1,2,3].map(o => `
+            <div class="option-row">
+              <input type="radio" name="correct_option_${idx}" value="${o}"
+                     class="option-radio" id="correct_${idx}_${o}"
+                     ${o === 0 ? "checked" : ""}>
+              <label for="correct_${idx}_${o}" class="option-radio-label" title="Mark as correct"></label>
+              <input class="form-input option-text" type="text"
+                     name="option_text_${idx}_${o}"
+                     placeholder="Option ${o + 1}" required />
+            </div>
+          `).join("")}
+        </div>
+        <p class="option-hint">Select the radio button next to the correct answer.</p>
+      </div>
+    </div>`;
+
+  container.insertAdjacentHTML("beforeend", html);
+  questionCount++;
+  questionCountInput.value = questionCount;
+  updateRemoveButtons();
+});
+
+// Remove a question block
+function removeQuestion(btn) {
+  btn.closest(".question-block").remove();
+  reIndexQuestions();
+  updateRemoveButtons();
+}
+
+// Re-number questions and rename their fields after removal
+function reIndexQuestions() {
+  document.querySelectorAll(".question-block").forEach((block, i) => {
+    block.dataset.index = i;
+    block.querySelector(".question-block__num").textContent = `Question ${i + 1}`;
+
+    const ta = block.querySelector(".question-text");
+    if (ta) ta.name = `question_text_${i}`;
+
+    block.querySelectorAll(".option-radio").forEach((radio, o) => {
+      radio.name = `correct_option_${i}`;
+      radio.value = o;
+      radio.id = `correct_${i}_${o}`;
+    });
+    block.querySelectorAll(".option-radio-label").forEach((lbl, o) => {
+      lbl.htmlFor = `correct_${i}_${o}`;
+    });
+    block.querySelectorAll(".option-text").forEach((inp, o) => {
+      inp.name = `option_text_${i}_${o}`;
+    });
+  });
+
+  questionCount = document.querySelectorAll(".question-block").length;
+  questionCountInput.value = questionCount;
+}
+
+// Hide the remove button on the first question if it's the only one
+function updateRemoveButtons() {
+  const blocks = document.querySelectorAll(".question-block");
+  blocks.forEach((block, i) => {
+    const btn = block.querySelector(".remove-q-btn");
+    if (btn) btn.style.visibility = (blocks.length === 1) ? "hidden" : "visible";
+  });
+}
+
+updateRemoveButtons();
+</script>
+{% endblock %}

@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard — {{ quiz.title }}{% endblock %}
+{% block meta_description %}Top scores for {{ quiz.title }}. Can you claim the #1 spot?{% endblock %}
+
+{% block content %}
+<section class="leaderboard-page">
+
+  <div class="leaderboard-header">
+    <h1 class="leaderboard-title">🏆 Leaderboard</h1>
+    <p class="leaderboard-quiz">{{ quiz.title }}</p>
+  </div>
+
+  {% if attempts %}
+    <div class="leaderboard-card card">
+      <table class="lb-table" role="table" aria-label="Top 10 scores for {{ quiz.title }}">
+        <thead>
+          <tr>
+            <th class="lb-th lb-th--rank">Rank</th>
+            <th class="lb-th">Player</th>
+            <th class="lb-th lb-th--center">Score</th>
+            <th class="lb-th lb-th--center">%</th>
+            <th class="lb-th lb-th--center">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for attempt in attempts %}
+            <tr class="lb-row {% if attempt.user_id == current_user.id %}lb-row--mine{% endif %}">
+
+              <!-- Rank -->
+              <td class="lb-td lb-td--rank">
+                {% if loop.index == 1 %}
+                  <span class="rank-medal rank-medal--gold">🥇</span>
+                {% elif loop.index == 2 %}
+                  <span class="rank-medal rank-medal--silver">🥈</span>
+                {% elif loop.index == 3 %}
+                  <span class="rank-medal rank-medal--bronze">🥉</span>
+                {% else %}
+                  <span class="rank-num">{{ loop.index }}</span>
+                {% endif %}
+              </td>
+
+              <!-- Player -->
+              <td class="lb-td lb-td--player">
+                <div class="lb-player">
+                  <span class="lb-avatar"
+                        style="background: {{ loop.index | avatar_color }};"
+                        aria-hidden="true">
+                    {{ attempt.user.username[0].upper() }}
+                  </span>
+                  <span class="lb-username">
+                    {{ attempt.user.username }}
+                    {% if attempt.user_id == current_user.id %}
+                      <span class="you-tag">You</span>
+                    {% endif %}
+                  </span>
+                </div>
+              </td>
+
+              <!-- Score -->
+              <td class="lb-td lb-td--center">
+                <strong>{{ attempt.score }}</strong> / {{ attempt.total_points }}
+              </td>
+
+              <!-- Percentage -->
+              <td class="lb-td lb-td--center">
+                <span class="lb-pct
+                  {% if attempt.percentage >= 80 %}lb-pct--high
+                  {% elif attempt.percentage >= 50 %}lb-pct--mid
+                  {% else %}lb-pct--low{% endif %}">
+                  {{ attempt.percentage }}%
+                </span>
+              </td>
+
+              <!-- Time -->
+              <td class="lb-td lb-td--center">{{ format_time(attempt.time_taken_seconds) }}</td>
+
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">🏆</div>
+      <h2 class="empty-title">No attempts yet</h2>
+      <p class="empty-body">Be the first to complete this quiz!</p>
+    </div>
+  {% endif %}
+
+  <div class="leaderboard-actions">
+    <a href="{{ url_for('quiz.start', quiz_id=quiz.id) }}" class="btn btn--primary"
+       id="leaderboard-play-btn">Play Now</a>
+    <a href="{{ url_for('quiz.lobby') }}" class="btn btn--ghost">← All Quizzes</a>
+  </div>
+
+</section>
+{% endblock %}

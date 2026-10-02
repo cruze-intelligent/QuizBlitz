@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard{% endblock %}
+{% block meta_description %}QuizBlitz admin panel — manage quizzes, users, and statistics.{% endblock %}
+
+{% block content %}
+<section class="admin-page">
+
+  <div class="admin-header">
+    <div>
+      <h1 class="admin-title">Admin Dashboard</h1>
+      <p class="admin-subtitle">Manage your QuizBlitz content</p>
+    </div>
+    <a href="{{ url_for('admin.new_quiz') }}" class="btn btn--primary" id="create-quiz-btn">
+      + New Quiz
+    </a>
+  </div>
+
+  <!-- Stats row -->
+  <div class="admin-stats">
+    <div class="admin-stat-card card">
+      <span class="admin-stat-icon">📋</span>
+      <span class="admin-stat-val">{{ quizzes | length }}</span>
+      <span class="admin-stat-label">Total Quizzes</span>
+    </div>
+    <div class="admin-stat-card card">
+      <span class="admin-stat-icon">👤</span>
+      <span class="admin-stat-val">{{ user_count }}</span>
+      <span class="admin-stat-label">Registered Users</span>
+    </div>
+    <div class="admin-stat-card card">
+      <span class="admin-stat-icon">🎯</span>
+      <span class="admin-stat-val">{{ attempt_count }}</span>
+      <span class="admin-stat-label">Quiz Attempts</span>
+    </div>
+    <div class="admin-stat-card card">
+      <span class="admin-stat-icon">✅</span>
+      <span class="admin-stat-val">{{ quizzes | selectattr("is_published") | list | length }}</span>
+      <span class="admin-stat-label">Published</span>
+    </div>
+  </div>
+
+  <!-- Quizzes table -->
+  <div class="admin-table-wrap card">
+    <h2 class="admin-table-heading">All Quizzes</h2>
+
+    {% if quizzes %}
+      <table class="admin-table" role="table" aria-label="All quizzes">
+        <thead>
+          <tr>
+            <th class="admin-th">Title</th>
+            <th class="admin-th admin-th--center">Category</th>
+            <th class="admin-th admin-th--center">Difficulty</th>
+            <th class="admin-th admin-th--center">Questions</th>
+            <th class="admin-th admin-th--center">Status</th>
+            <th class="admin-th admin-th--center">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for quiz in quizzes %}
+            <tr class="admin-tr">
+              <td class="admin-td admin-td--title">
+                <strong>{{ quiz.title }}</strong>
+                <span class="admin-quiz-desc">{{ quiz.description[:60] }}{% if quiz.description|length > 60 %}…{% endif %}</span>
+              </td>
+              <td class="admin-td admin-td--center">
+                <span class="pill pill--category">{{ quiz.category }}</span>
+              </td>
+              <td class="admin-td admin-td--center">
+                <span class="badge badge--{{ quiz.difficulty }}">{{ quiz.difficulty | title }}</span>
+              </td>
+              <td class="admin-td admin-td--center">{{ quiz.question_count }}</td>
+              <td class="admin-td admin-td--center">
+                {% if quiz.is_published %}
+                  <span class="status-badge status-badge--published">Published</span>
+                {% else %}
+                  <span class="status-badge status-badge--draft">Draft</span>
+                {% endif %}
+              </td>
+              <td class="admin-td admin-td--center">
+                <div class="admin-actions">
+                  <a href="{{ url_for('admin.edit_quiz', quiz_id=quiz.id) }}"
+                     class="btn btn--ghost btn--xs"
+                     id="edit-quiz-{{ quiz.id }}">Edit</a>
+
+                  <form method="POST"
+                        action="{{ url_for('admin.delete_quiz', quiz_id=quiz.id) }}"
+                        style="display:inline"
+                        onsubmit="return confirm('Unpublish this quiz?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <button type="submit" class="btn btn--danger btn--xs"
+                            id="delete-quiz-{{ quiz.id }}">
+                      Unpublish
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">📋</div>
+        <h2 class="empty-title">No quizzes yet</h2>
+        <p class="empty-body">Create your first quiz to get started.</p>
+        <a href="{{ url_for('admin.new_quiz') }}" class="btn btn--primary">Create Quiz</a>
+      </div>
+    {% endif %}
+  </div>
+
+</section>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="join-screen">
+  <div class="card join-card">
+    <p class="eyebrow">Join the quiz</p>
+    <h1>Enter your team name</h1>
+    <form action="{{ url_for('play.join_session', session_code=session_code) }}" method="POST">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <label for="team_name">Team name</label>
+      <input id="team_name" name="team_name" placeholder="e.g. The Winners" required />
+      <button class="btn btn--primary" type="submit">Join game</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

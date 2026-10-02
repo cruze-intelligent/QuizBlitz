@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Quiz Lobby{% endblock %}
+{% block meta_description %}Browse and play quizzes on General Knowledge, History, Science, and more.{% endblock %}
+
+{% block content %}
+<section class="lobby-page">
+
+  <!-- Hero -->
+  <div class="lobby-hero">
+    <h1 class="lobby-title">Choose Your Quiz</h1>
+    <p class="lobby-subtitle">
+      Test your knowledge across topics. One question at a time. Beat the clock.
+    </p>
+  </div>
+
+  <!-- Filters -->
+  <form method="GET" action="{{ url_for('quiz.lobby') }}" class="filter-bar" id="filter-form">
+    <div class="filter-group">
+      <label class="filter-label" for="filter-category">Category</label>
+      <select class="filter-select" name="category" id="filter-category"
+              onchange="this.form.submit()">
+        <option value="">All categories</option>
+        {% for cat in categories %}
+          <option value="{{ cat }}" {% if cat == selected_category %}selected{% endif %}>
+            {{ cat }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label class="filter-label" for="filter-difficulty">Difficulty</label>
+      <select class="filter-select" name="difficulty" id="filter-difficulty"
+              onchange="this.form.submit()">
+        <option value="">All levels</option>
+        <option value="easy"   {% if selected_difficulty == 'easy'   %}selected{% endif %}>Easy</option>
+        <option value="medium" {% if selected_difficulty == 'medium' %}selected{% endif %}>Medium</option>
+        <option value="hard"   {% if selected_difficulty == 'hard'   %}selected{% endif %}>Hard</option>
+      </select>
+    </div>
+
+    {% if selected_category or selected_difficulty %}
+      <a href="{{ url_for('quiz.lobby') }}" class="btn btn--ghost btn--sm filter-clear">
+        Clear filters
+      </a>
+    {% endif %}
+  </form>
+
+  <!-- Quiz grid -->
+  {% if quizzes %}
+    <div class="quiz-grid">
+      {% for quiz in quizzes %}
+        <article class="quiz-card card" aria-label="{{ quiz.title }}">
+
+          <!-- Header row -->
+          <div class="quiz-card__header">
+            <span class="pill pill--category">{{ quiz.category }}</span>
+            <span class="badge badge--{{ quiz.difficulty }}">{{ quiz.difficulty | title }}</span>
+          </div>
+
+          <h2 class="quiz-card__title">{{ quiz.title }}</h2>
+          <p class="quiz-card__desc">{{ quiz.description or "No description provided." }}</p>
+
+          <!-- Stats -->
+          <div class="quiz-card__stats">
+            <div class="stat">
+              <span class="stat-icon">❓</span>
+              <span>{{ quiz.question_count }} questions</span>
+            </div>
+            <div class="stat">
+              <span class="stat-icon">⏱</span>
+              <span>
+                {% set mins = quiz.time_limit_seconds // 60 %}
+                {% set secs = quiz.time_limit_seconds % 60 %}
+                {{ mins }}{% if secs %}:{{ '%02d' % secs }}{% endif %} min
+              </span>
+            </div>
+            <div class="stat">
+              <span class="stat-icon">🏆</span>
+              <span>{{ quiz.total_points }} pts</span>
+            </div>
+          </div>
+
+          <!-- CTA -->
+          <a href="{{ url_for('quiz.start', quiz_id=quiz.id) }}"
+             class="btn btn--primary btn--full quiz-card__cta"
+             id="start-quiz-{{ quiz.id }}">
+            Play Now →
+          </a>
+
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">🔍</div>
+      <h2 class="empty-title">No quizzes found</h2>
+      <p class="empty-body">Try removing filters or check back later.</p>
+      <a href="{{ url_for('quiz.lobby') }}" class="btn btn--primary">View all quizzes</a>
+    </div>
+  {% endif %}
+
+</section>
+{% endblock %}
