@@ -41,7 +41,16 @@ A lightweight, self-hosted quiz game inspired by Kahoot for local network play.
 
 - Quiz master: `master@quizblitz.com` / `master123`
 - Admin: `admin@quizblitz.com` / `admin123`
+- Dave: `dave@quizblitz.com` / `dave123`
 
-## Notes
+## Operational notes
 
 This app uses Flask-SocketIO with the `eventlet` async worker for live sessions. The database is SQLite for local MVP development and is easy to swap to PostgreSQL later.
+
+Use the health check to verify the app and database are responsive:
+
+```bash
+curl http://localhost:5000/health
+```
+
+The app also writes operational activity to `logs/quizblitz.log` for session creation, quiz updates, and live gameplay actions.

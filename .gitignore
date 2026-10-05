@@ -19,6 +19,9 @@ ENV/
 *.sqlite
 *.sqlite3
 
+# Runtime logs
+logs/
+
 # Test, coverage, and type-checker caches
 .pytest_cache/
 .coverage

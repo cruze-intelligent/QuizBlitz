@@ -3,11 +3,11 @@ import base64
 import io
 
 import qrcode
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
 from app import socketio
-from app.models import GameSession, Option, Question, Quiz, Team, TeamAnswer, db
+from app.models import GameSession, Option, Question, Quiz, QuizAttempt, Team, TeamAnswer, db
 
 master_bp = Blueprint("master", __name__)
 
@@ -26,8 +26,36 @@ def _generate_session_code() -> str:
 @master_bp.route("/", methods=["GET"])
 @login_required
 def dashboard():
-    quizzes = Quiz.query.order_by(Quiz.created_at.desc()).all()
-    return render_template("master/dashboard.html", quizzes=quizzes, title="Master Dashboard")
+    search = request.args.get("q", "").strip()
+    quiz_query = Quiz.query
+
+    if search:
+        quiz_query = quiz_query.filter(Quiz.title.ilike(f"%{search}%"))
+
+    if not getattr(current_user, "is_admin", False):
+        quiz_query = quiz_query.filter(Quiz.created_by == current_user.id)
+
+    quizzes = quiz_query.order_by(Quiz.created_at.desc()).all()
+
+    total_attempts = QuizAttempt.query.count()
+    average_score = 0.0
+    if total_attempts:
+        average_score = round(sum(attempt.score for attempt in QuizAttempt.query.all()) / total_attempts, 1)
+
+    stats = {
+        "total_quizzes": len(quizzes),
+        "live_sessions": GameSession.query.count(),
+        "attempts": total_attempts,
+        "avg_score": average_score,
+    }
+
+    return render_template(
+        "master/dashboard.html",
+        quizzes=quizzes,
+        stats=stats,
+        search=search,
+        title="Master Dashboard",
+    )
 
 
 @master_bp.route("/quiz/new", methods=["GET", "POST"])
@@ -95,6 +123,7 @@ def create_quiz():
                 )
 
         db.session.commit()
+        current_app.logger.info("Quiz created by %s: %s", current_user.username, quiz.title)
         flash("Quiz created successfully.", "success")
         return redirect(url_for("master.dashboard"))
 
@@ -137,6 +166,7 @@ def create_session():
     db.session.add(game_session)
     db.session.commit()
 
+    current_app.logger.info("Session %s created for quiz %s by %s", session_code, quiz.title, current_user.username)
     flash(f"Session {session_code} created.", "success")
     return redirect(url_for("master.lobby", code=game_session.session_code))
 
@@ -157,6 +187,7 @@ def start_session(code: str):
     game_session.current_question_index = 0
     game_session.started_at = datetime.now(timezone.utc)
     db.session.commit()
+    current_app.logger.info("Session %s started by %s", code, current_user.username)
     socketio.emit("session_started", {}, room=code)
     _push_question(game_session)
     return redirect(url_for("master.lobby", code=code))
@@ -192,6 +223,7 @@ def reveal_answer(code: str):
         team_results.append({"team_name": team.team_name, "is_correct": is_correct})
 
     db.session.commit()
+    current_app.logger.info("Answer revealed for session %s on question %s", code, question.id)
 
     payload = {
         "correct_option_id": correct_option.id if correct_option else None,
@@ -225,6 +257,7 @@ def next_question(code: str):
         game_session.state = "finished"
         game_session.ended_at = datetime.now(timezone.utc)
         db.session.commit()
+        current_app.logger.info("Session %s finished by %s", code, current_user.username)
         socketio.emit("session_finished", {"final_rankings": _leaderboard_payload(game_session)}, room=code)
         return redirect(url_for("master.lobby", code=code))
 

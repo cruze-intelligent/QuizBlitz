@@ -92,6 +92,10 @@ def play(quiz_id: int):
     """
     quiz = Quiz.query.filter_by(id=quiz_id, is_published=True).first_or_404()
 
+    if quiz.question_count == 0:
+        flash("This quiz has no questions yet. Please choose another quiz.", "warning")
+        return redirect(url_for("quiz.lobby"))
+
     # Ensure start was recorded; if not, restart the timer gracefully
     if f"quiz_{quiz_id}_start" not in session:
         session[f"quiz_{quiz_id}_start"] = datetime.now(timezone.utc).isoformat()

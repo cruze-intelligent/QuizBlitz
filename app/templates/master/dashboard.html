@@ -10,10 +10,29 @@
     <a class="btn btn--primary" href="{{ url_for('master.create_quiz') }}">Create a quiz</a>
   </div>
 
+  <div class="stats-grid" aria-label="Quiz statistics">
+    <div class="card stat-card">
+      <span class="stat-label">Quizzes</span>
+      <strong>{{ stats.total_quizzes }}</strong>
+    </div>
+    <div class="card stat-card">
+      <span class="stat-label">Live sessions</span>
+      <strong>{{ stats.live_sessions }}</strong>
+    </div>
+    <div class="card stat-card">
+      <span class="stat-label">Attempts</span>
+      <strong>{{ stats.attempts }}</strong>
+    </div>
+    <div class="card stat-card">
+      <span class="stat-label">Avg score</span>
+      <strong>{{ stats.avg_score }}%</strong>
+    </div>
+  </div>
+
   <div class="card">
     <h2>Create a live session</h2>
     {% if quizzes %}
-      <form action="{{ url_for('master.create_session') }}" method="POST">
+      <form action="{{ url_for('master.create_session') }}" method="POST" class="session-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="field-group">
           <label for="quiz_id">Select quiz</label>
@@ -31,20 +50,44 @@
     {% endif %}
   </div>
 
-  <h2>Your quizzes</h2>
-  <div class="quiz-grid">
-    {% for quiz in quizzes %}
-      <article class="card quiz-card">
-        <div class="quiz-card__header">
-          <span class="badge">{{ quiz.category }}</span>
-          <span class="badge badge--muted">{{ quiz.question_count }} Qs</span>
+  <div class="card filter-card">
+    <div class="filter-header">
+      <h2>Your quizzes</h2>
+      <form method="GET" class="search-form">
+        <label class="sr-only" for="quiz-search">Search quizzes</label>
+        <input id="quiz-search" class="form-input" type="search" name="q" value="{{ search }}" placeholder="Search quizzes..." />
+        <button class="btn btn--ghost btn--sm" type="submit">Search</button>
+        {% if search %}
+          <a class="btn btn--ghost btn--sm" href="{{ url_for('master.dashboard') }}">Clear</a>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="quiz-grid">
+      {% for quiz in quizzes %}
+        <article class="card quiz-card">
+          <div class="quiz-card__header">
+            <span class="badge badge--{{ quiz.difficulty|lower if quiz.difficulty in ['easy','medium','hard'] else 'easy' }}">{{ quiz.difficulty or 'easy' }}</span>
+            <span class="pill pill--category">{{ quiz.category }}</span>
+          </div>
+          <h3 class="quiz-card__title">{{ quiz.title }}</h3>
+          <p class="quiz-card__desc">{{ quiz.description or 'No description provided.' }}</p>
+          <div class="quiz-card__stats">
+            <div class="stat"><span class="stat-icon">❓</span> {{ quiz.question_count }} Qs</div>
+            <div class="stat"><span class="stat-icon">⏱</span> {{ quiz.time_limit_seconds }}s</div>
+          </div>
+          <a href="{{ url_for('master.lobby', code=quiz.sessions.first().session_code) if quiz.sessions.first() else '#' }}" class="btn btn--ghost btn--sm quiz-card__cta">
+            {{ 'Open session' if quiz.sessions.first() else 'No active session' }}
+          </a>
+        </article>
+      {% else %}
+        <div class="empty-state">
+          <div class="empty-icon">📭</div>
+          <div class="empty-title">No quizzes yet</div>
+          <div class="empty-body">Create your first quiz to start live sessions.</div>
         </div>
-        <h3>{{ quiz.title }}</h3>
-        <p>{{ quiz.description or 'No description provided.' }}</p>
-      </article>
-    {% else %}
-      <p class="empty-state">No quizzes yet.</p>
-    {% endfor %}
+      {% endfor %}
+    </div>
   </div>
 </section>
 {% endblock %}

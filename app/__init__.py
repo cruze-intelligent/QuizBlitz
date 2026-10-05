@@ -1,10 +1,15 @@
 """Flask application factory for QuizBlitz."""
 
+import logging
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
 import click
-from flask import Flask, redirect, url_for
+from flask import Flask, jsonify, redirect, url_for
 from flask_login import LoginManager
 from flask_socketio import SocketIO
 from flask_wtf.csrf import CSRFProtect
+from sqlalchemy import text
 
 from config import config
 from app.models import (
@@ -44,6 +49,16 @@ def create_app(config_name: str = "default") -> Flask:
     app = Flask(__name__)
     app.config.from_object(config[config_name])
 
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(exist_ok=True)
+    if not any(isinstance(handler, RotatingFileHandler) for handler in app.logger.handlers):
+        file_handler = RotatingFileHandler(log_dir / "quizblitz.log", maxBytes=1_048_576, backupCount=5, encoding="utf-8")
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.propagate = False
+
     db.init_app(app)
     login_manager.init_app(app)
     csrf.init_app(app)
@@ -66,12 +81,24 @@ def create_app(config_name: str = "default") -> Flask:
     def index():
         return redirect(url_for("master.dashboard"))
 
+    @app.route("/health")
+    def health():
+        try:
+            db.session.execute(text("SELECT 1"))
+            status = "ok"
+            db_state = "connected"
+        except Exception:
+            status = "degraded"
+            db_state = "unavailable"
+        return jsonify({"status": status, "database": db_state})
+
     _register_filters(app)
     _register_commands(app)
 
     with app.app_context():
         db.create_all()
 
+    app.logger.info("QuizBlitz started with %s configuration", config_name)
     return app
 
 
