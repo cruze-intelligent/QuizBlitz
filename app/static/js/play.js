@@ -3,15 +3,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const root = document.querySelector('[data-session-code]');
   if (!root || typeof io === 'undefined') return;
   const sessionCode = root.dataset.sessionCode;
-  const teamId = Number(root.dataset.teamId);
-  const teamName = root.dataset.teamName;
+  // No team id/name is sent: the server identifies the team from the session cookie.
 
   const questionText = document.getElementById('question-text');
   const optionList = document.getElementById('option-list');
   const status = document.getElementById('status-message');
 
   const socket = io();
-  socket.on('connect', () => socket.emit('join_room', { session_code: sessionCode, team_name: teamName }));
+  socket.on('connect', () => socket.emit('join_room', { session_code: sessionCode }));
 
   socket.on('question_pushed', (payload) => {
     questionText.textContent = payload.question_text;
@@ -27,7 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
       button.dataset.optionId = option.id; // read back on reveal to highlight the correct option
       button.textContent = option.text;
       button.addEventListener('click', () => {
-        socket.emit('submit_answer', { session_code: sessionCode, team_id: teamId, option_id: option.id });
+        socket.emit('submit_answer', { session_code: sessionCode, option_id: option.id });
         optionList.querySelectorAll('.answer-option').forEach((btn) => { btn.disabled = true; });
         button.classList.add('is-selected');
         status.textContent = 'Answer submitted!';
