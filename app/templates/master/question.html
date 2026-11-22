@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Question {{ question_number }} · {{ session.session_code }}{% endblock %}
+
+{% block content %}
+<section class="master-screen" data-session-code="{{ session.session_code }}">
+  {% include "master/_screen_bar.html" %}
+
+  <div class="card master-card">
+    <div class="question-meta">
+      <span class="badge">Round {{ question.round_number }}</span>
+      <span class="badge badge--muted">Question {{ question_number }} of {{ total_questions }}</span>
+      <span class="badge badge--muted">{{ question.points }} pts</span>
+    </div>
+
+    <h1 class="master-question-text">{{ question.text }}</h1>
+
+    {# Display only — no correct-answer marking: teams can see this screen. #}
+    <ol class="option-list option-list--display" aria-label="Answer options">
+      {% for option in options %}
+        <li class="answer-option">{{ option.text }}</li>
+      {% endfor %}
+    </ol>
+
+    {% set pct = (answers_in / team_count * 100) if team_count else 0 %}
+    <div class="answer-meter">
+      <p class="answer-meter__label" role="status" aria-live="polite">
+        <span data-answers-in>{{ answers_in }}</span> / <span data-total-teams>{{ team_count }}</span> answered
+      </p>
+      <div class="answer-meter__track" aria-hidden="true">
+        <div class="answer-meter__fill" data-answer-bar style="width: {{ '%.0f' % pct }}%"></div>
+      </div>
+    </div>
+
+    <div class="screen-actions">
+      <form action="{{ url_for('master.reveal_answer', code=session.session_code) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn--warning btn--lg" type="submit">Reveal answer</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/master.js') }}"></script>
+{% endblock %}

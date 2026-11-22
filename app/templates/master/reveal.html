@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Answer {{ question_number }} · {{ session.session_code }}{% endblock %}
+
+{% block content %}
+<section class="master-screen" data-session-code="{{ session.session_code }}">
+  {% include "master/_screen_bar.html" %}
+
+  <div class="card master-card">
+    <div class="question-meta">
+      <span class="badge">Round {{ question.round_number }}</span>
+      <span class="badge badge--muted">Question {{ question_number }} of {{ total_questions }}</span>
+    </div>
+
+    <h1 class="master-question-text master-question-text--compact">{{ question.text }}</h1>
+
+    <ol class="option-list option-list--display" aria-label="Answers and how many teams picked each">
+      {% for option in reveal.options %}
+        <li class="answer-option {{ 'is-correct' if option.is_correct else 'is-dimmed' }}">
+          <span class="answer-option__text">{{ option.text }}</span>
+          <span class="option-count">{{ option.count }} {{ 'team' if option.count == 1 else 'teams' }}</span>
+          {% if option.is_correct %}<span class="sr-only">(correct answer)</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+
+    {% set total = reveal.passed_count + reveal.failed_count %}
+    {% set pass_pct = (reveal.passed_count / total * 100) if total else 0 %}
+    <div class="passfail">
+      <div class="passfail__bar" aria-hidden="true">
+        <span class="passfail__pass" style="width: {{ '%.0f' % pass_pct }}%"></span>
+        <span class="passfail__fail" style="width: {{ '%.0f' % (100 - pass_pct if total else 0) }}%"></span>
+      </div>
+      <p class="passfail__labels">
+        <span class="is-pass">✓ {{ reveal.passed_count }} correct</span>
+        <span class="is-fail">✗ {{ reveal.failed_count }} wrong or no answer</span>
+      </p>
+    </div>
+
+    {% if reveal.team_results %}
+      <ul class="team-list" aria-label="Team results">
+        {% for result in reveal.team_results %}
+          {% if result.is_correct %}
+            <li class="is-correct">✓ {{ result.team_name }}</li>
+          {% elif result.answered %}
+            <li class="is-wrong">✗ {{ result.team_name }}</li>
+          {% else %}
+            <li class="is-missing">{{ result.team_name }} <span class="sr-only">(no answer)</span></li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <div class="screen-actions">
+      <form action="{{ url_for('master.next_question', code=session.session_code) }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button class="btn btn--primary btn--lg" type="submit">Show scores</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/master.js') }}"></script>
+{% endblock %}

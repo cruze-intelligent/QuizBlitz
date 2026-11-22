@@ -1,5 +1,9 @@
-// Quiz master lobby: live team roster + answer counter over Socket.IO.
+// Quiz master screens (lobby, question, reveal, leaderboard).
+// State changes are server-rendered via POST + redirect; this script only adds the live
+// bits: team roster/count, the "X / Y answered" meter, and the leaderboard animation.
 document.addEventListener('DOMContentLoaded', () => {
+  animateLeaderboard();
+
   const root = document.querySelector('[data-session-code]');
   if (!root || typeof io === 'undefined') return;
   const room = root.dataset.sessionCode;
@@ -8,25 +12,59 @@ document.addEventListener('DOMContentLoaded', () => {
   // Re-join on every (re)connect so a dropped connection doesn't silently stop updates.
   socket.on('connect', () => socket.emit('join_room', { session_code: room }));
 
-  const list = document.querySelector('.team-list');
-  const count = document.querySelector('[data-team-count]');
+  const setText = (selector, value) => document.querySelectorAll(selector).forEach((el) => { el.textContent = value; });
+  let totalTeams = Number(document.querySelector('[data-total-teams]')?.textContent || 0);
 
   socket.on('team_joined', (payload) => {
-    if (count) count.textContent = payload.team_count;
-    if (!list) return;
+    setText('[data-team-count]', payload.team_count);
+    totalTeams = payload.team_count;
+    setText('[data-total-teams]', totalTeams);
 
+    const list = document.querySelector('.lobby-layout .team-list');
+    if (!list) return;
     list.querySelector('.team-list__empty')?.remove();
     // A team's phone re-emits join_room on reconnect; don't list it twice.
-    const exists = [...list.children].some((li) => li.textContent === payload.team_name);
-    if (exists) return;
-
+    if ([...list.children].some((li) => li.textContent === payload.team_name)) return;
     const item = document.createElement('li');
     item.textContent = payload.team_name;
     list.appendChild(item);
   });
 
   socket.on('answer_received', (payload) => {
-    const text = document.querySelector('[data-answer-progress]');
-    if (text) text.textContent = `${payload.answers_in} / ${payload.total_teams} answered`;
+    totalTeams = payload.total_teams;
+    setText('[data-answers-in]', payload.answers_in);
+    setText('[data-total-teams]', totalTeams);
+    const bar = document.querySelector('[data-answer-bar]');
+    if (bar) bar.style.width = `${totalTeams ? Math.round((payload.answers_in / totalTeams) * 100) : 0}%`;
   });
 });
+
+// FLIP: render rows in their new order, start each at its previous position, then let
+// them slide into place so the room sees who overtook whom.
+function animateLeaderboard() {
+  const board = document.querySelector('[data-leaderboard]');
+  if (!board || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const rows = [...board.children];
+  if (rows.length < 2) return;
+  const step = rows[1].offsetTop - rows[0].offsetTop;
+
+  let moved = false;
+  rows.forEach((row) => {
+    const offset = (Number(row.dataset.prevIndex) - Number(row.dataset.index)) * step;
+    if (offset) {
+      moved = true;
+      row.style.transition = 'none';
+      row.style.transform = `translateY(${offset}px)`;
+      row.style.zIndex = offset > 0 ? '1' : '0'; // climbers slide over the rows they pass
+    }
+  });
+  if (!moved) return;
+
+  // Hold the old order briefly so viewers register it, then animate.
+  setTimeout(() => {
+    rows.forEach((row) => {
+      row.style.transition = 'transform 0.9s cubic-bezier(0.2, 0.8, 0.2, 1)';
+      row.style.transform = '';
+    });
+  }, 600);
+}

@@ -6,19 +6,11 @@
     <h2>Join Code: <strong>{{ session.session_code }}</strong></h2>
     <img src="data:image/png;base64,{{ qr_b64 }}" alt="QR code linking to {{ join_url }}" class="qr-code" />
     <p class="join-url">or open <a href="{{ join_url }}" target="_blank" rel="noopener">{{ join_url }}</a></p>
-    <p class="answer-progress" data-answer-progress></p>
     <div class="lobby-actions">
+      {# Reveal / Next live on the in-game screens (master/question, reveal, leaderboard). #}
       <form action="{{ url_for('master.start_session', code=session.session_code) }}" method="POST">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button class="btn btn--primary" type="submit">Start quiz</button>
-      </form>
-      <form action="{{ url_for('master.reveal_answer', code=session.session_code) }}" method="POST">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button class="btn btn--warning" type="submit">Reveal answer</button>
-      </form>
-      <form action="{{ url_for('master.next_question', code=session.session_code) }}" method="POST">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button class="btn btn--secondary" type="submit">Next</button>
+        <button class="btn btn--primary btn--lg" type="submit">Start quiz</button>
       </form>
     </div>
   </div>

@@ -185,6 +185,11 @@ class GameSession(db.Model):
         idx = min(max(self.current_question_index, 0), len(question_list) - 1)
         return question_list[idx]
 
+    def answers_for(self, question):
+        """This session's answers to `question`. Questions belong to the quiz, which can be
+        played in many sessions, so filtering by question alone would mix sessions."""
+        return TeamAnswer.query.join(Team).filter(Team.session_id == self.id, TeamAnswer.question_id == question.id)
+
     def __repr__(self) -> str:
         return f"<GameSession {self.session_code}: {self.state}>"
 

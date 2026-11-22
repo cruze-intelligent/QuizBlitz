@@ -83,7 +83,7 @@ def handle_submit_answer(data=None):
         db.session.rollback()
         return
 
-    answers_in = TeamAnswer.query.filter_by(question_id=question.id).count()
+    answers_in = game_session.answers_for(question).count()
     emit(
         "answer_received",
         {"answers_in": answers_in, "total_teams": game_session.team_count},

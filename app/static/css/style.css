@@ -1289,9 +1289,6 @@ select.form-input option { background: var(--clr-bg-3); }
 .join-url a { color: #c4b5fd; font-weight: 600; font-variant-numeric: tabular-nums; }
 @media (min-width: 1024px) { .join-url { font-size: 1.05rem; } }
 
-.answer-progress { font-size: 1.1rem; font-weight: 700; color: #fcd34d; }
-.answer-progress:empty { display: none; }
-
 .lobby-actions {
   display: flex;
   flex-direction: column;
@@ -1323,7 +1320,170 @@ select.form-input option { background: var(--clr-bg-3); }
   color: var(--clr-text-muted);
 }
 
-/* ── 24. Motion preferences ─────────────────────────────────────── */
+/* ── 24. Live game — quiz master in-game screens ───────────────── */
+/* question → reveal → leaderboard. Mobile first (a master may run the game from a
+   phone), scaled up from 1024px for a laptop or projector across a room. */
+.master-screen {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+.master-card { display: flex; flex-direction: column; gap: var(--space-lg); }
+
+.screen-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-md);
+  font-size: 0.9rem;
+  color: var(--clr-text-muted);
+}
+.screen-bar strong { color: var(--clr-text); letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+.screen-bar__url { display: none; }
+@media (min-width: 1024px) {
+  .screen-bar { font-size: 1.05rem; }
+  .screen-bar__url { display: inline; }
+}
+
+.master-heading { font-size: clamp(1.5rem, 6vw, 2.6rem); font-weight: 900; }
+.master-question-text {
+  font-size: clamp(1.3rem, 5vw, 2.6rem);
+  font-weight: 800;
+  line-height: 1.25;
+}
+.master-question-text--compact { font-size: clamp(1.15rem, 4vw, 1.9rem); }
+
+/* Answer options shown read-only on the master screen (same A–D colours as phones) */
+.option-list { list-style: none; }
+.option-list--display .answer-option { cursor: default; }
+.option-list--display .answer-option::after { margin-left: var(--space-sm); }
+.answer-option__text { min-width: 0; }
+.answer-option.is-dimmed { opacity: .45; }
+.option-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0.15rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: rgba(0,0,0,.28);
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+@media (min-width: 640px) {
+  .master-screen .option-list { display: grid; grid-template-columns: 1fr 1fr; }
+}
+@media (min-width: 1024px) {
+  .master-screen .answer-option { min-height: 84px; font-size: 1.3rem; padding: 1rem 1.25rem; }
+  .master-screen .answer-option::before { width: 2.5rem; height: 2.5rem; font-size: 1.15rem; }
+}
+
+/* Live "X / Y answered" meter */
+.answer-meter { display: flex; flex-direction: column; gap: var(--space-sm); }
+.answer-meter__label { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.answer-meter__track {
+  height: 12px;
+  border-radius: var(--radius-full);
+  background: var(--clr-surface-hov);
+  overflow: hidden;
+}
+.answer-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--grad-brand);
+  transition: width var(--tr-slow);
+}
+@media (min-width: 1024px) {
+  .answer-meter__label { font-size: 1.5rem; }
+  .answer-meter__track { height: 16px; }
+}
+
+/* Reveal: pass/fail split bar */
+.passfail { display: flex; flex-direction: column; gap: var(--space-sm); }
+.passfail__bar {
+  display: flex;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--clr-surface-hov);
+  overflow: hidden;
+}
+.passfail__pass { background: var(--clr-green); }
+.passfail__fail { background: var(--clr-red); }
+.passfail__labels {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-md);
+  font-weight: 800;
+}
+.passfail__labels .is-pass { color: #6ee7b7; }
+.passfail__labels .is-fail { color: #fca5a5; }
+@media (min-width: 1024px) { .passfail__labels { font-size: 1.2rem; } }
+
+/* Reveal: per-team result pills */
+.team-list li.is-correct { background: rgba(16,185,129,.18); border-color: rgba(16,185,129,.45); color: #a7f3d0; }
+.team-list li.is-wrong   { background: rgba(239,68,68,.15);  border-color: rgba(239,68,68,.4);  color: #fecaca; }
+.team-list li.is-missing { background: none; border-style: dashed; border-color: var(--clr-border-hov); color: var(--clr-text-muted); }
+
+/* Leaderboard rows. The delta cell is always rendered so columns stay aligned. */
+.rank-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-sm); }
+.rank-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0.7rem var(--space-md);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+  background: var(--clr-bg-2);   /* opaque: rows slide over each other when animating */
+}
+.rank-row__rank { text-align: center; font-weight: 900; font-size: 1.1rem; color: var(--clr-text-muted); font-variant-numeric: tabular-nums; }
+.rank-row__name { min-width: 0; font-weight: 700; }
+.rank-row__score { min-width: 3ch; text-align: right; font-weight: 900; font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.rank-row--top1 { border-color: rgba(245,158,11,.6); background: linear-gradient(90deg, rgba(245,158,11,.2), transparent 70%), var(--clr-bg-2); }
+.rank-row--top1 .rank-row__rank { color: #fcd34d; }
+.rank-row--top2 { border-color: rgba(203,213,225,.45); }
+.rank-row--top2 .rank-row__rank { color: #e2e8f0; }
+.rank-row--top3 { border-color: rgba(217,119,6,.45); }
+.rank-row--top3 .rank-row__rank { color: #f59e0b; }
+
+.delta-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: var(--radius-full);
+  background: rgba(16,185,129,.18);
+  border: 1px solid rgba(16,185,129,.4);
+  color: #6ee7b7;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.rank-move { margin-left: 0.35rem; font-size: 0.75rem; font-weight: 800; white-space: nowrap; }
+.rank-move--up   { color: #6ee7b7; }
+.rank-move--down { color: #fca5a5; }
+
+@media (min-width: 1024px) {
+  .rank-row { grid-template-columns: 3rem minmax(0, 1fr) auto auto; gap: var(--space-md); padding: 1rem 1.5rem; }
+  .rank-row__rank { font-size: 1.5rem; }
+  .rank-row__name { font-size: 1.3rem; }
+  .rank-row__score { font-size: 1.6rem; }
+  .delta-badge { font-size: 1rem; }
+  .rank-move { font-size: 0.9rem; }
+}
+
+/* Primary action: full width for the thumb on phones, right-aligned on larger screens */
+.screen-actions { display: flex; flex-direction: column; gap: var(--space-sm); }
+.screen-actions form, .screen-actions .btn { width: 100%; }
+@media (min-width: 640px) {
+  .screen-actions { flex-direction: row; justify-content: flex-end; }
+  .screen-actions form, .screen-actions .btn { width: auto; }
+}
+
+/* ── 25. Motion preferences ─────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;

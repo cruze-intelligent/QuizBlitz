@@ -1,0 +1,9 @@
+{# Header strip on every in-game master screen: lets late teams still join and shows the
+   live team count (updated by master.js on team_joined). #}
+<header class="screen-bar">
+  <span class="screen-bar__join">
+    Join code <strong>{{ session.session_code }}</strong>
+    <span class="screen-bar__url">· {{ join_url }}</span>
+  </span>
+  <span class="screen-bar__teams"><span data-team-count>{{ team_count }}</span> {{ 'team' if team_count == 1 else 'teams' }}</span>
+</header>

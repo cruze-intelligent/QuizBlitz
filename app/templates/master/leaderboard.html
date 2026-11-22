@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Final results' if is_final else 'Leaderboard' }} · {{ session.session_code }}{% endblock %}
+
+{% block content %}
+<section class="master-screen" data-session-code="{{ session.session_code }}">
+  {% include "master/_screen_bar.html" %}
+
+  <div class="card master-card">
+    <div>
+      <h1 class="master-heading">{{ '🏆 Final results' if is_final else 'Leaderboard' }}</h1>
+      <p class="text-muted">
+        {% if is_final %}{{ session.quiz.title }} · {{ total_questions }} questions{% else %}After question {{ question_number }} of {{ total_questions }}{% endif %}
+      </p>
+    </div>
+
+    {% if rankings %}
+      {# data-prev-index lets master.js animate rows from their previous position. #}
+      <ol class="rank-list" data-leaderboard aria-label="Team rankings">
+        {% for row in rankings %}
+          <li class="rank-row {{ 'rank-row--top%d' % row.rank if row.rank <= 3 }}"
+              data-index="{{ loop.index0 }}" data-prev-index="{{ row.prev_index }}">
+            <span class="rank-row__rank" aria-label="Rank {{ row.rank }}">{{ row.rank }}</span>
+            <span class="rank-row__name">
+              {{ row.team_name }}
+              {% if row.movement > 0 %}
+                <span class="rank-move rank-move--up" aria-label="up {{ row.movement }}">▲{{ row.movement }}</span>
+              {% elif row.movement < 0 %}
+                <span class="rank-move rank-move--down" aria-label="down {{ -row.movement }}">▼{{ -row.movement }}</span>
+              {% endif %}
+            </span>
+            <span class="rank-row__delta">
+              {% if row.score_delta %}<span class="delta-badge" aria-label="plus {{ row.score_delta }} points">+{{ row.score_delta }}</span>{% endif %}
+            </span>
+            <span class="rank-row__score">{{ row.score }}</span>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <div class="empty-state">
+        <div class="empty-icon">👥</div>
+        <div class="empty-title">No teams joined</div>
+      </div>
+    {% endif %}
+
+    <div class="screen-actions">
+      {% if is_final %}
+        <a class="btn btn--primary btn--lg" href="{{ url_for('master.dashboard') }}">Back to dashboard</a>
+      {% else %}
+        <form action="{{ url_for('master.next_question', code=session.session_code) }}" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button class="btn btn--primary btn--lg" type="submit">{{ 'Finish quiz' if is_last_question else 'Next question' }}</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/master.js') }}"></script>
+{% endblock %}
