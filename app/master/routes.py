@@ -5,6 +5,7 @@ import io
 import qrcode
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy import case, func
 
 from app import socketio
 from app.models import GameSession, Option, Question, Quiz, QuizAttempt, QuizMaster, Team, TeamAnswer, db
@@ -78,9 +79,13 @@ def dashboard():
     quizzes = quiz_query.order_by(Quiz.created_at.desc()).all()
 
     total_attempts = QuizAttempt.query.count()
-    average_score = 0.0
-    if total_attempts:
-        average_score = round(sum(attempt.score for attempt in QuizAttempt.query.all()) / total_attempts, 1)
+    # Mean of per-attempt percentages (same rule as QuizAttempt.percentage: 0% when no
+    # points were available). Averaging raw `score` produced points, shown as e.g. "120.0%".
+    attempt_pct = case(
+        (QuizAttempt.total_points > 0, QuizAttempt.score * 100.0 / QuizAttempt.total_points),
+        else_=0.0,
+    )
+    average_score = round(db.session.query(func.avg(attempt_pct)).scalar() or 0.0, 1)
 
     stats = {
         "total_quizzes": len(quizzes),
