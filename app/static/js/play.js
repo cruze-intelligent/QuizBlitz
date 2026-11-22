@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     optionList.querySelectorAll('.answer-option').forEach((btn) => {
       btn.disabled = true;
       if (Number(btn.dataset.optionId) === payload.correct_option_id) btn.classList.add('is-correct');
+      else if (btn.classList.contains('is-selected')) btn.classList.add('is-wrong'); // team's own wrong pick
     });
     status.textContent = `Correct answer: ${payload.correct_option_text}`;
   });

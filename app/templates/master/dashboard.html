@@ -36,7 +36,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="field-group">
           <label for="quiz_id">Select quiz</label>
-          <select id="quiz_id" name="quiz_id" required>
+          <select id="quiz_id" name="quiz_id" class="form-input" required>
             {% for quiz in quizzes %}
               <option value="{{ quiz.id }}">{{ quiz.title }}</option>
             {% endfor %}

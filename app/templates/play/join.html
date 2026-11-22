@@ -5,11 +5,12 @@
   <div class="card join-card">
     <p class="eyebrow">Join the quiz</p>
     <h1>Enter your team name</h1>
-    <form action="{{ url_for('play.join_session', session_code=session_code) }}" method="POST">
+    <form action="{{ url_for('play.join_session', session_code=session_code) }}" method="POST" class="join-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <label for="team_name">Team name</label>
-      <input id="team_name" name="team_name" placeholder="e.g. The Winners" required />
-      <button class="btn btn--primary" type="submit">Join game</button>
+      <label for="team_name" class="form-label">Team name</label>
+      <input id="team_name" name="team_name" class="form-input" placeholder="e.g. The Winners"
+             maxlength="120" autocomplete="off" autocapitalize="words" enterkeyhint="go" required />
+      <button class="btn btn--primary btn--lg btn--full" type="submit">Join game</button>
     </form>
   </div>
 </section>

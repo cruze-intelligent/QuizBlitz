@@ -7,9 +7,9 @@
       <span class="badge">Round <span id="round-number">1</span></span>
       <span class="badge badge--muted">Question <span id="question-number">1</span></span>
     </div>
-    <h1 id="question-text">Waiting for the next question...</h1>
+    <h1 id="question-text" class="live-question-text">Waiting for the next question...</h1>
     <div id="option-list" class="option-list"></div>
-    <p id="status-message" class="status-message">Waiting for game to begin.</p>
+    <p id="status-message" class="status-message" role="status" aria-live="polite">Waiting for game to begin.</p>
   </div>
 </section>
 {% endblock %}
