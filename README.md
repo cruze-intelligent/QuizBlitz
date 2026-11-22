@@ -31,7 +31,16 @@ A lightweight, self-hosted quiz game inspired by Kahoot for local network play.
    python run.py
    ```
 
-   For production or SocketIO eventlet compatibility, prefer:
+   This serves on all network interfaces (port 5000) so phones on the same Wi-Fi can
+   join, and prints the address to use. **Open the app on the quiz master's computer via
+   that network address, not `localhost`**: the lobby QR code points at whatever address
+   the browser used. On Windows, allow Python through the firewall when prompted.
+
+   Options (environment variables): `QUIZBLITZ_HOST`, `QUIZBLITZ_PORT`, and
+   `QUIZBLITZ_DEBUG=1` for debug mode with auto-reload. Debug mode is forced onto
+   `127.0.0.1` because its interactive debugger would let anyone on the network run code.
+
+   For production, prefer:
 
    ```bash
    gunicorn --worker-class eventlet -w 1 run:app
