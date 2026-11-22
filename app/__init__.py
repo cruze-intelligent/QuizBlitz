@@ -37,12 +37,16 @@ csrf = CSRFProtect()
 
 @login_manager.user_loader
 def load_user(user_id: str):
-    """Load any supported user type from the session."""
-    for model in (User, QuizMaster):
-        user = db.session.get(model, int(user_id))
-        if user is not None:
-            return user
-    return None
+    """Load a User or QuizMaster from a prefixed id ("user:1" / "master:1").
+
+    Both tables number from 1, so a bare numeric id is ambiguous. Old-style
+    bare ids are rejected, which simply forces a fresh login.
+    """
+    kind, _, raw_id = (user_id or "").partition(":")
+    model = {"user": User, "master": QuizMaster}.get(kind)
+    if model is None or not raw_id.isdigit():
+        return None
+    return db.session.get(model, int(raw_id))
 
 
 def create_app(config_name: str = "default") -> Flask:
@@ -79,7 +83,9 @@ def create_app(config_name: str = "default") -> Flask:
 
     @app.route("/")
     def index():
-        return redirect(url_for("master.dashboard"))
+        from app.auth.routes import home_url
+
+        return redirect(home_url())
 
     @app.route("/health")
     def health():

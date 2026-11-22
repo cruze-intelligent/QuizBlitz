@@ -23,6 +23,10 @@ class User(UserMixin, db.Model):
 
     attempts = db.relationship("QuizAttempt", backref="user", lazy="dynamic")
 
+    def get_id(self) -> str:
+        # Prefixed so it can't collide with a QuizMaster that has the same numeric id.
+        return f"user:{self.id}"
+
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
 
@@ -45,6 +49,12 @@ class QuizMaster(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     quizzes = db.relationship("Quiz", backref="master", lazy="dynamic", foreign_keys="Quiz.created_by")
+
+    # Quiz masters are never site admins; defined so shared templates/guards can check it.
+    is_admin = False
+
+    def get_id(self) -> str:
+        return f"master:{self.id}"
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)

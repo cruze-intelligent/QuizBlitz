@@ -14,6 +14,18 @@ from app.auth.forms import RegistrationForm, LoginForm
 auth_bp = Blueprint("auth", __name__)
 
 
+def home_url() -> str:
+    """Landing page for the current user: quiz masters run live games,
+    admins manage content, regular users play self-paced quizzes."""
+    if not current_user.is_authenticated:
+        return url_for("auth.login")
+    if isinstance(current_user._get_current_object(), QuizMaster):
+        return url_for("master.dashboard")
+    if current_user.is_admin:
+        return url_for("admin.dashboard")
+    return url_for("quiz.lobby")
+
+
 @auth_bp.route("/register", methods=["GET", "POST"])
 def register():
     """Create a new user account."""
@@ -40,7 +52,7 @@ def register():
 def login():
     """Log in with email and password."""
     if current_user.is_authenticated:
-        return redirect(url_for("master.dashboard"))
+        return redirect(home_url())
 
     form = LoginForm()
     if form.validate_on_submit():
@@ -52,7 +64,7 @@ def login():
             login_user(user, remember=form.remember_me.data)
             next_page = request.args.get("next")
             flash(f"Welcome back, {user.username}!", "success")
-            return redirect(next_page or url_for("master.dashboard"))
+            return redirect(next_page or home_url())
 
         flash("Invalid email or password.", "danger")
 

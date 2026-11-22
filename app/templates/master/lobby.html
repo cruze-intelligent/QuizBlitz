@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
-<section class="lobby-layout">
+<section class="lobby-layout" data-session-code="{{ session.session_code }}">
   <div class="card qr-card">
     <h2>Join Code: <strong>{{ session.session_code }}</strong></h2>
     {% if session.qr_b64 %}
       <img src="data:image/png;base64,{{ session.qr_b64 }}" alt="QR code for session" class="qr-code" />
     {% endif %}
+    <p class="answer-progress" data-answer-progress></p>
     <div class="lobby-actions">
       <form action="{{ url_for('master.start_session', code=session.session_code) }}" method="POST">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
@@ -24,14 +25,19 @@
   </div>
 
   <div class="card roster-card">
-    <h2>Teams</h2>
+    <h2>Teams (<span data-team-count>{{ teams|length }}</span>)</h2>
     <ul class="team-list">
       {% for team in teams %}
         <li>{{ team.team_name }}</li>
       {% else %}
-        <li>No teams joined yet.</li>
+        <li class="team-list__empty">No teams joined yet.</li>
       {% endfor %}
     </ul>
   </div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/master.js') }}"></script>
 {% endblock %}

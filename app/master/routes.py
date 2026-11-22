@@ -7,9 +7,52 @@ from flask import Blueprint, abort, current_app, flash, redirect, render_templat
 from flask_login import current_user, login_required
 
 from app import socketio
-from app.models import GameSession, Option, Question, Quiz, QuizAttempt, Team, TeamAnswer, db
+from app.models import GameSession, Option, Question, Quiz, QuizAttempt, QuizMaster, Team, TeamAnswer, db
 
 master_bp = Blueprint("master", __name__)
+
+
+@master_bp.before_request
+@login_required
+def _require_quiz_master():
+    """Live-game routes are for QuizMaster accounts only (not regular users or admins)."""
+    if not isinstance(current_user._get_current_object(), QuizMaster):
+        from app.auth.routes import home_url
+
+        flash("Only quiz master accounts can run live sessions.", "warning")
+        return redirect(home_url())
+    return None
+
+
+def _get_owned_quiz(quiz_id) -> Quiz:
+    quiz = db.session.get(Quiz, quiz_id) if quiz_id else None
+    if quiz is None or quiz.created_by != current_user.id:
+        abort(404)
+    return quiz
+
+
+def _get_owned_session(code: str) -> GameSession:
+    """Fetch a session the current quiz master owns; 404 otherwise so codes aren't probeable."""
+    game_session = GameSession.query.filter_by(session_code=code).first_or_404()
+    if game_session.quiz is None or game_session.quiz.created_by != current_user.id:
+        abort(404)
+    return game_session
+
+
+def _transition(game_session: GameSession, from_states, to_state: str, **fields) -> bool:
+    """Atomically move the session to `to_state` only if it's currently in `from_states`.
+
+    The conditional UPDATE means a double-click or two concurrent requests can't both
+    win, so side effects (scoring, pushing questions) run at most once per transition.
+    """
+    updated = (
+        GameSession.query.filter(GameSession.id == game_session.id, GameSession.state.in_(from_states))
+        .update({"state": to_state, **fields}, synchronize_session=False)
+    )
+    db.session.commit()
+    if updated:
+        db.session.refresh(game_session)
+    return bool(updated)
 
 
 def _generate_session_code() -> str:
@@ -27,13 +70,10 @@ def _generate_session_code() -> str:
 @login_required
 def dashboard():
     search = request.args.get("q", "").strip()
-    quiz_query = Quiz.query
+    quiz_query = Quiz.query.filter(Quiz.created_by == current_user.id)
 
     if search:
         quiz_query = quiz_query.filter(Quiz.title.ilike(f"%{search}%"))
-
-    if not getattr(current_user, "is_admin", False):
-        quiz_query = quiz_query.filter(Quiz.created_by == current_user.id)
 
     quizzes = quiz_query.order_by(Quiz.created_at.desc()).all()
 
@@ -142,10 +182,7 @@ def create_session():
     if request.method == "GET":
         return redirect(url_for("master.dashboard"))
 
-    quiz_id = request.form.get("quiz_id", type=int)
-    quiz = db.session.get(Quiz, quiz_id)
-    if not quiz:
-        abort(404)
+    quiz = _get_owned_quiz(request.form.get("quiz_id", type=int))
 
     session_code = _generate_session_code()
     join_url = f"{request.host_url.rstrip('/')}play/{session_code}"
@@ -174,7 +211,7 @@ def create_session():
 @master_bp.route("/session/<code>/lobby", methods=["GET"])
 @login_required
 def lobby(code: str):
-    game_session = GameSession.query.filter_by(session_code=code).first_or_404()
+    game_session = _get_owned_session(code)
     teams = game_session.teams.order_by(Team.joined_at.asc()).all()
     return render_template("master/lobby.html", session=game_session, teams=teams, title=f"Lobby — {code}")
 
@@ -182,11 +219,22 @@ def lobby(code: str):
 @master_bp.route("/session/<code>/start", methods=["POST"])
 @login_required
 def start_session(code: str):
-    game_session = GameSession.query.filter_by(session_code=code).first_or_404()
-    game_session.state = "question"
-    game_session.current_question_index = 0
-    game_session.started_at = datetime.now(timezone.utc)
-    db.session.commit()
+    game_session = _get_owned_session(code)
+    if game_session.quiz.question_count == 0:
+        flash("This quiz has no questions.", "warning")
+        return redirect(url_for("master.lobby", code=code))
+
+    started = _transition(
+        game_session,
+        ["lobby"],
+        "question",
+        current_question_index=0,
+        started_at=datetime.now(timezone.utc),
+    )
+    if not started:
+        flash("This session has already started.", "warning")
+        return redirect(url_for("master.lobby", code=code))
+
     current_app.logger.info("Session %s started by %s", code, current_user.username)
     socketio.emit("session_started", {}, room=code)
     _push_question(game_session)
@@ -196,13 +244,15 @@ def start_session(code: str):
 @master_bp.route("/session/<code>/reveal", methods=["POST"])
 @login_required
 def reveal_answer(code: str):
-    game_session = GameSession.query.filter_by(session_code=code).first_or_404()
+    game_session = _get_owned_session(code)
     question = game_session.current_question()
     if not question:
         abort(404)
 
-    game_session.state = "reveal"
-    db.session.commit()
+    # Only one reveal per question: scoring below must never run twice.
+    if not _transition(game_session, ["question"], "reveal"):
+        flash("There's no open question to reveal right now.", "warning")
+        return redirect(url_for("master.lobby", code=code))
 
     correct_option = question.correct_option
     team_results = []
@@ -239,33 +289,36 @@ def reveal_answer(code: str):
 @master_bp.route("/session/<code>/next", methods=["POST"])
 @login_required
 def next_question(code: str):
-    game_session = GameSession.query.filter_by(session_code=code).first_or_404()
-    question_list = list(game_session.quiz.questions.order_by(Question.order_index).all())
-    if not question_list:
-        flash("This quiz has no questions.", "warning")
-        return redirect(url_for("master.lobby", code=code))
+    """Advance the state machine: REVEAL → LEADERBOARD → next QUESTION (or FINISHED)."""
+    game_session = _get_owned_session(code)
+    question_total = game_session.quiz.question_count
+    lobby_url = url_for("master.lobby", code=code)
 
     if game_session.state == "reveal":
-        game_session.state = "leaderboard"
-        db.session.commit()
-        rankings = _leaderboard_payload(game_session)
-        socketio.emit("leaderboard_updated", {"rankings": rankings}, room=code)
-        return redirect(url_for("master.lobby", code=code))
+        if _transition(game_session, ["reveal"], "leaderboard"):
+            rankings = _leaderboard_payload(game_session)
+            socketio.emit("leaderboard_updated", {"rankings": rankings}, room=code)
+        return redirect(lobby_url)
 
-    current_index = game_session.current_question_index
-    if current_index + 1 >= len(question_list):
-        game_session.state = "finished"
-        game_session.ended_at = datetime.now(timezone.utc)
-        db.session.commit()
-        current_app.logger.info("Session %s finished by %s", code, current_user.username)
-        socketio.emit("session_finished", {"final_rankings": _leaderboard_payload(game_session)}, room=code)
-        return redirect(url_for("master.lobby", code=code))
+    if game_session.state != "leaderboard":
+        messages = {
+            "lobby": "Start the quiz first.",
+            "question": "Reveal the answer before moving on.",
+            "finished": "This session has finished.",
+        }
+        flash(messages.get(game_session.state, "Can't advance from here."), "warning")
+        return redirect(lobby_url)
 
-    game_session.current_question_index = current_index + 1
-    game_session.state = "question"
-    db.session.commit()
-    _push_question(game_session)
-    return redirect(url_for("master.lobby", code=code))
+    next_index = game_session.current_question_index + 1
+    if next_index >= question_total:
+        if _transition(game_session, ["leaderboard"], "finished", ended_at=datetime.now(timezone.utc)):
+            current_app.logger.info("Session %s finished by %s", code, current_user.username)
+            socketio.emit("session_finished", {"final_rankings": _leaderboard_payload(game_session)}, room=code)
+        return redirect(lobby_url)
+
+    if _transition(game_session, ["leaderboard"], "question", current_question_index=next_index):
+        _push_question(game_session)
+    return redirect(lobby_url)
 
 
 def _push_question(game_session: GameSession):
