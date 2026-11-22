@@ -4,9 +4,8 @@
 <section class="lobby-layout" data-session-code="{{ session.session_code }}">
   <div class="card qr-card">
     <h2>Join Code: <strong>{{ session.session_code }}</strong></h2>
-    {% if session.qr_b64 %}
-      <img src="data:image/png;base64,{{ session.qr_b64 }}" alt="QR code for session" class="qr-code" />
-    {% endif %}
+    <img src="data:image/png;base64,{{ qr_b64 }}" alt="QR code linking to {{ join_url }}" class="qr-code" />
+    <p class="join-url">or open <a href="{{ join_url }}" target="_blank" rel="noopener">{{ join_url }}</a></p>
     <p class="answer-progress" data-answer-progress></p>
     <div class="lobby-actions">
       <form action="{{ url_for('master.start_session', code=session.session_code) }}" method="POST">

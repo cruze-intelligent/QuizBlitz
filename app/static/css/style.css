@@ -1285,6 +1285,10 @@ select.form-input option { background: var(--clr-bg-3); }
 }
 @media (min-width: 1024px) { .qr-code { width: min(100%, 400px); } }
 
+.join-url { font-size: 0.9rem; color: var(--clr-text-muted); overflow-wrap: anywhere; }
+.join-url a { color: #c4b5fd; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (min-width: 1024px) { .join-url { font-size: 1.05rem; } }
+
 .answer-progress { font-size: 1.1rem; font-weight: 700; color: #fcd34d; }
 .answer-progress:empty { display: none; }
 

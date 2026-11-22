@@ -190,12 +190,9 @@ def create_session():
     quiz = _get_owned_quiz(request.form.get("quiz_id", type=int))
 
     session_code = _generate_session_code()
-    join_url = f"{request.host_url.rstrip('/')}play/{session_code}"
-    qr = qrcode.make(join_url)
-    buffer = io.BytesIO()
-    qr.save(buffer, format="PNG")
-    qr_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
 
+    # qr_b64 is no longer stored: the lobby builds the QR from the host the master is
+    # actually browsing on (see _join_qr), so it is always reachable from phones.
     game_session = GameSession(
         session_code=session_code,
         quiz_id=quiz.id,
@@ -203,7 +200,6 @@ def create_session():
         current_question_index=0,
         started_at=None,
         ended_at=None,
-        qr_b64=qr_b64,
     )
     db.session.add(game_session)
     db.session.commit()
@@ -218,7 +214,27 @@ def create_session():
 def lobby(code: str):
     game_session = _get_owned_session(code)
     teams = game_session.teams.order_by(Team.joined_at.asc()).all()
-    return render_template("master/lobby.html", session=game_session, teams=teams, title=f"Lobby — {code}")
+    join_url, qr_b64 = _join_qr(game_session.session_code)
+    return render_template(
+        "master/lobby.html",
+        session=game_session,
+        teams=teams,
+        join_url=join_url,
+        qr_b64=qr_b64,
+        title=f"Lobby — {code}",
+    )
+
+
+def _join_qr(session_code: str):
+    """Team join URL and its QR code (base64 PNG) for the current request's host.
+
+    Built per request rather than stored at creation, so the QR always matches the
+    address the master's browser is using (e.g. the laptop's Wi-Fi IP for phones).
+    """
+    join_url = url_for("play.join_form", session_code=session_code, _external=True)
+    buffer = io.BytesIO()
+    qrcode.make(join_url).save(buffer, format="PNG")
+    return join_url, base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 @master_bp.route("/session/<code>/start", methods=["POST"])
