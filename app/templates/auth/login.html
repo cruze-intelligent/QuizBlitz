@@ -12,7 +12,7 @@
       <p class="auth-subtitle">Log in to continue your quizzing journey</p>
     </div>
 
-    <form method="POST" action="{{ url_for('auth.login') }}" novalidate id="login-form">
+    <form method="POST" action="{{ url_for('auth.login', next=request.args.get('next')) }}" novalidate id="login-form">
       {{ form.hidden_tag() }}  {# CSRF token #}
 
       <!-- Email -->

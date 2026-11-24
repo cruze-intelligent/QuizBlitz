@@ -9,7 +9,7 @@ from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import (
     DataRequired, Email, EqualTo, Length, ValidationError
 )
-from app.models import User
+from app.models import User, find_account
 
 
 class RegistrationForm(FlaskForm):
@@ -34,7 +34,7 @@ class RegistrationForm(FlaskForm):
         "Password",
         validators=[
             DataRequired(message="Password is required."),
-            Length(min=6, message="Password must be at least 6 characters."),
+            Length(min=8, max=128, message="Password must be 8–128 characters."),
         ],
     )
     confirm_password = PasswordField(
@@ -50,12 +50,13 @@ class RegistrationForm(FlaskForm):
 
     def validate_username(self, field):
         """Ensure the chosen username is not already taken."""
-        if User.query.filter_by(username=field.data).first():
+        if User.query.filter_by(username=field.data.strip()).first():
             raise ValidationError("That username is already taken.")
 
     def validate_email(self, field):
-        """Ensure the email address is not already registered."""
-        if User.query.filter_by(email=field.data.lower()).first():
+        """Ensure the email address is not already registered, including by a quiz master:
+        login looks players up first, so a duplicate would lock the quiz master out."""
+        if find_account(field.data.strip().lower()):
             raise ValidationError("An account with that email already exists.")
 
 

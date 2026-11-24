@@ -5,11 +5,15 @@ All passwords are hashed by Werkzeug before storage.
 CSRF is handled automatically by Flask-WTF on every form.
 """
 
-from flask import Blueprint, render_template, redirect, url_for, flash, request
-from flask_login import login_user, logout_user, login_required, current_user
+from urllib.parse import urlsplit
 
-from app.models import db, QuizMaster, User
-from app.auth.forms import RegistrationForm, LoginForm
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask_limiter.util import get_remote_address
+from flask_login import current_user, login_required, login_user, logout_user
+
+from app import limiter
+from app.auth.forms import LoginForm, RegistrationForm
+from app.models import QuizMaster, User, db, find_account
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -26,11 +30,34 @@ def home_url() -> str:
     return url_for("quiz.lobby")
 
 
+def safe_next(target: str | None) -> str | None:
+    """`target` if it is a path on this site, otherwise None.
+
+    Browsers treat "//host" and "/\\host" as another site and drop control characters,
+    so those are rejected as well as full URLs.
+    """
+    if not target or not target.startswith("/") or target.startswith("//"):
+        return None
+    if "\\" in target or not target.isprintable():
+        return None
+    parts = urlsplit(target)
+    return None if parts.scheme or parts.netloc else target
+
+
+def _login_key() -> str:
+    return f"{get_remote_address()}:{request.form.get('email', '').strip().lower()[:120]}"
+
+
+def _login_failed(response) -> bool:
+    return response.status_code != 302
+
+
 @auth_bp.route("/register", methods=["GET", "POST"])
+@limiter.limit("20 per hour", methods=["POST"])
 def register():
     """Create a new user account."""
     if current_user.is_authenticated:
-        return redirect(url_for("quiz.lobby"))
+        return redirect(home_url())
 
     form = RegistrationForm()
     if form.validate_on_submit():
@@ -48,7 +75,10 @@ def register():
     return render_template("auth/register.html", form=form, title="Register")
 
 
+# Only failed attempts count: 8 per account from one address, 40 from one address overall.
 @auth_bp.route("/login", methods=["GET", "POST"])
+@limiter.limit("8 per 15 minutes", key_func=_login_key, methods=["POST"], deduct_when=_login_failed)
+@limiter.limit("40 per 15 minutes", methods=["POST"], deduct_when=_login_failed)
 def login():
     """Log in with email and password."""
     if current_user.is_authenticated:
@@ -56,15 +86,11 @@ def login():
 
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(email=form.email.data.strip().lower()).first()
-        if user is None:
-            user = QuizMaster.query.filter_by(email=form.email.data.strip().lower()).first()
-
+        user = find_account(form.email.data.strip().lower())
         if user and user.check_password(form.password.data):
             login_user(user, remember=form.remember_me.data)
-            next_page = request.args.get("next")
             flash(f"Welcome back, {user.username}!", "success")
-            return redirect(next_page or home_url())
+            return redirect(safe_next(request.args.get("next")) or home_url())
 
         flash("Invalid email or password.", "danger")
 
