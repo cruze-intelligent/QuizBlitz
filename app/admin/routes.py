@@ -6,13 +6,12 @@ The @admin_required decorator aborts with 403 if the user is not an admin.
 """
 
 from functools import wraps
-from flask import (
-    Blueprint, render_template, redirect, url_for,
-    flash, request, abort
-)
-from flask_login import login_required, current_user
 
-from app.models import db, Quiz, Question, Option, User, QuizAttempt
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
+
+from app.models import Quiz, QuizAttempt, QuizMaster, User, db
+from app.quiz import editor
 
 admin_bp = Blueprint("admin", __name__)
 
@@ -59,23 +58,20 @@ def dashboard():
 @admin_required
 def new_quiz():
     """Render and handle the create-quiz form."""
-    if request.method == "POST":
-        quiz = _quiz_from_form(request.form, creator_id=current_user.id)
-        db.session.add(quiz)
-        db.session.flush()   # get quiz.id before adding questions
-
-        _save_questions(quiz.id, request.form)
-        db.session.commit()
-
-        flash(f'Quiz "{quiz.title}" created successfully.', "success")
+    if not QuizMaster.query.first():
+        flash("Every quiz belongs to a quiz master. Create a quiz master account first.", "warning")
         return redirect(url_for("admin.dashboard"))
 
-    return render_template(
-        "admin/quiz_form.html",
-        quiz=None,
-        title="Create Quiz",
-        action=url_for("admin.new_quiz"),
-    )
+    form = editor.blank_form()
+    if request.method == "POST":
+        form, errors = _parse()
+        if not errors:
+            quiz = Quiz(created_by=form["owner_id"])
+            editor.save(quiz, form)
+            flash(f'Quiz "{quiz.title}" created successfully.', "success")
+            return redirect(url_for("admin.dashboard"))
+
+    return _render_form(form, "Create Quiz", url_for("admin.new_quiz"), is_new=True)
 
 
 # ── Edit Quiz ──────────────────────────────────────────────────────────────
@@ -89,32 +85,21 @@ def edit_quiz(quiz_id: int):
     if not quiz:
         abort(404)
 
-    if request.method == "POST":
-        # Update scalar fields
-        quiz.title = request.form.get("title", "").strip()
-        quiz.description = request.form.get("description", "").strip()
-        quiz.category = request.form.get("category", "General").strip()
-        quiz.difficulty = request.form.get("difficulty", "easy")
-        quiz.time_limit_seconds = int(request.form.get("time_limit_seconds", 180))
-        quiz.is_published = "is_published" in request.form
-
-        # Replace all questions with what was submitted
-        for q in quiz.questions.all():
-            db.session.delete(q)
-        db.session.flush()
-
-        _save_questions(quiz.id, request.form)
-        db.session.commit()
-
-        flash(f'Quiz "{quiz.title}" updated.', "success")
+    game = editor.active_game(quiz)
+    if game:
+        flash(f"This quiz is being played now (game {game.session_code}). Edit it after the game ends.", "warning")
         return redirect(url_for("admin.dashboard"))
 
-    return render_template(
-        "admin/quiz_form.html",
-        quiz=quiz,
-        title="Edit Quiz",
-        action=url_for("admin.edit_quiz", quiz_id=quiz_id),
-    )
+    form = editor.form_from_quiz(quiz)
+    if request.method == "POST":
+        form, errors = _parse()
+        if not errors:
+            quiz.created_by = form["owner_id"]
+            editor.save(quiz, form)
+            flash(f'Quiz "{quiz.title}" updated.', "success")
+            return redirect(url_for("admin.dashboard"))
+
+    return _render_form(form, "Edit Quiz", url_for("admin.edit_quiz", quiz_id=quiz_id), is_new=False)
 
 
 # ── Delete (soft) Quiz ─────────────────────────────────────────────────────
@@ -136,56 +121,27 @@ def delete_quiz(quiz_id: int):
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _quiz_from_form(form_data, creator_id: int) -> Quiz:
-    """Build a Quiz object from POST form data."""
-    return Quiz(
-        title=form_data.get("title", "").strip(),
-        description=form_data.get("description", "").strip(),
-        category=form_data.get("category", "General").strip(),
-        difficulty=form_data.get("difficulty", "easy"),
-        time_limit_seconds=int(form_data.get("time_limit_seconds", 180)),
-        is_published="is_published" in form_data,
-        created_by=creator_id,
+def _parse():
+    """Parse the form, requiring a quiz master as the owner.
+
+    Admins are Users, whose ids overlap with QuizMaster ids, so an admin's own id must
+    never be stored in Quiz.created_by.
+    """
+    form, errors = editor.parse_form(request.form)
+    if form["owner_id"] is None or db.session.get(QuizMaster, form["owner_id"]) is None:
+        errors.append("Choose the quiz master who owns this quiz.")
+    for error in errors:
+        flash(error, "danger")
+    return form, errors
+
+
+def _render_form(form: dict, title: str, action: str, is_new: bool):
+    return render_template(
+        "admin/quiz_form.html",
+        form=form,
+        is_new=is_new,
+        masters=QuizMaster.query.order_by(QuizMaster.username).all(),
+        title=title,
+        action=action,
+        back_url=url_for("admin.dashboard"),
     )
-
-
-def _save_questions(quiz_id: int, form_data) -> None:
-    """
-    Parse question + option data from a multi-value form submission and
-    persist Question / Option rows.
-
-    Expected form field pattern:
-      question_text_0, question_text_1, …
-      option_text_0_0, option_text_0_1, option_text_0_2, option_text_0_3
-      correct_option_0  (value = "0" | "1" | "2" | "3")
-    """
-    idx = 0
-    while True:
-        q_text = form_data.get(f"question_text_{idx}", "").strip()
-        if not q_text:
-            break
-
-        question = Question(
-            quiz_id=quiz_id,
-            text=q_text,
-            order_index=idx,
-            points=1,
-        )
-        db.session.add(question)
-        db.session.flush()
-
-        correct_idx = int(form_data.get(f"correct_option_{idx}", 0))
-
-        for opt_idx in range(4):
-            opt_text = form_data.get(f"option_text_{idx}_{opt_idx}", "").strip()
-            if not opt_text:
-                continue
-            option = Option(
-                question_id=question.id,
-                text=opt_text,
-                is_correct=(opt_idx == correct_idx),
-                order_index=opt_idx,
-            )
-            db.session.add(option)
-
-        idx += 1

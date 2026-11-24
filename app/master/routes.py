@@ -9,7 +9,8 @@ from flask_login import current_user, login_required
 from sqlalchemy import case, func
 
 from app import socketio
-from app.models import GameSession, Option, Question, Quiz, QuizAttempt, QuizMaster, Team, TeamAnswer, db
+from app.models import GameSession, Option, Quiz, QuizAttempt, QuizMaster, Team, TeamAnswer, db
+from app.quiz import editor
 
 master_bp = Blueprint("master", __name__)
 
@@ -107,77 +108,54 @@ def dashboard():
 @master_bp.route("/quiz/new", methods=["GET", "POST"])
 @login_required
 def create_quiz():
+    form = editor.blank_form()
     if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        if not title:
-            flash("Quiz title is required.", "danger")
-            return redirect(url_for("master.create_quiz"))
+        form, errors = editor.parse_form(request.form)
+        if not errors:
+            quiz = Quiz(created_by=current_user.id)
+            editor.save(quiz, form)
+            current_app.logger.info("Quiz created by %s: %s", current_user.username, quiz.title)
+            flash("Quiz created successfully.", "success")
+            return redirect(url_for("master.dashboard"))
+        _flash_errors(errors)
 
-        num_questions = request.form.get("question_count", default=1, type=int)
-        if num_questions is None or not 1 <= num_questions <= 50:
-            flash("A quiz must have between 1 and 50 questions.", "danger")
-            return redirect(url_for("master.create_quiz"))
+    return _quiz_form(form, "Create Quiz", url_for("master.create_quiz"), is_new=True)
 
-        question_data = []
-        for idx in range(num_questions):
-            question_text = request.form.get(f"question_text_{idx}", "").strip()
-            options = [
-                request.form.get(f"option_text_{idx}_{option_idx}", "").strip()
-                for option_idx in range(4)
-            ]
-            correct_option = request.form.get(f"correct_option_{idx}", type=int)
-            if not question_text or any(not option for option in options):
-                flash(f"Question {idx + 1} and all four answer options are required.", "danger")
-                return redirect(url_for("master.create_quiz"))
-            if correct_option not in range(4):
-                flash(f"Choose the correct answer for question {idx + 1}.", "danger")
-                return redirect(url_for("master.create_quiz"))
-            question_data.append((question_text, options, correct_option))
 
-        quiz = Quiz(
-            title=title,
-            description=request.form.get("description", "").strip(),
-            category=request.form.get("category", "General").strip() or "General",
-            difficulty=request.form.get("difficulty", "easy").strip() or "easy",
-            time_limit_seconds=int(request.form.get("time_limit_seconds", 30) or 30),
-            is_published=True,
-            created_by=current_user.id,
-        )
-        db.session.add(quiz)
-        db.session.flush()
-
-        for idx, (question_text, options, correct_option) in enumerate(question_data):
-            question = Question(
-                quiz_id=quiz.id,
-                text=question_text,
-                order_index=idx,
-                round_number=1,
-                order_in_round=idx + 1,
-                time_limit_seconds=30,
-                points=10,
-            )
-            db.session.add(question)
-            db.session.flush()
-            for opt_idx, option_text in enumerate(options):
-                db.session.add(
-                    Option(
-                        question_id=question.id,
-                        text=option_text,
-                        is_correct=opt_idx == correct_option,
-                        order_index=opt_idx,
-                    )
-                )
-
-        db.session.commit()
-        current_app.logger.info("Quiz created by %s: %s", current_user.username, quiz.title)
-        flash("Quiz created successfully.", "success")
+@master_bp.route("/quiz/<int:quiz_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_quiz(quiz_id: int):
+    quiz = _get_owned_quiz(quiz_id)
+    game = editor.active_game(quiz)
+    if game:
+        flash(f"This quiz is being played now (game {game.session_code}). Edit it after the game ends.", "warning")
         return redirect(url_for("master.dashboard"))
 
+    form = editor.form_from_quiz(quiz)
+    if request.method == "POST":
+        form, errors = editor.parse_form(request.form)
+        if not errors:
+            editor.save(quiz, form)
+            current_app.logger.info("Quiz edited by %s: %s", current_user.username, quiz.title)
+            flash("Quiz updated.", "success")
+            return redirect(url_for("master.dashboard"))
+        _flash_errors(errors)
+
+    return _quiz_form(form, "Edit Quiz", url_for("master.edit_quiz", quiz_id=quiz_id), is_new=False)
+
+
+def _flash_errors(errors: list[str]) -> None:
+    for error in errors:
+        flash(error, "danger")
+
+
+def _quiz_form(form: dict, title: str, action: str, is_new: bool):
     return render_template(
         "admin/quiz_form.html",
-        quiz=None,
-        title="Create Quiz",
-        action=url_for("master.create_quiz"),
+        form=form,
+        is_new=is_new,
+        title=title,
+        action=action,
         back_url=url_for("master.dashboard"),
     )
 
@@ -391,7 +369,7 @@ def _push_question(game_session: GameSession):
     socketio.emit("question_pushed", payload, room=game_session.session_code)
 
 
-def _reveal_summary(game_session: GameSession, question: Question) -> dict:
+def _reveal_summary(game_session: GameSession, question) -> dict:
     """Results for a revealed question: correct option, per-option pick counts and
     each team's outcome. Teams that didn't answer count as failed (spec)."""
     correct = question.correct_option

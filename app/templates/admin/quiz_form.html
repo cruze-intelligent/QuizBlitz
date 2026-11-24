@@ -1,12 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ title }}{% endblock %}
 
-{% macro _render_question(idx, q=None) %}
+{% macro _render_question(idx, q) %}
 <div class="question-block__inner">
+  {# The id lets the server update this question in place when the quiz is edited. #}
+  <input type="hidden" class="question-id" name="question_id_{{ idx }}" value="{{ q.id or '' }}" />
   <div class="question-block__header">
     <span class="question-block__num">Question {{ idx + 1 }}</span>
     <button type="button" class="btn btn--danger btn--xs remove-q-btn"
-            onclick="removeQuestion(this)" {% if idx == 0 %}style="visibility:hidden"{% endif %}>
+            onclick="removeQuestion(this)">
       Remove
     </button>
   </div>
@@ -15,7 +17,7 @@
     <label class="form-label">Question text *</label>
     <textarea class="form-input form-textarea question-text"
               name="question_text_{{ idx }}"
-              placeholder="Enter your question here…" required>{{ q.text if q else '' }}</textarea>
+              placeholder="Enter your question here…" required>{{ q.text }}</textarea>
   </div>
 
   <div class="options-grid">
@@ -24,16 +26,16 @@
         <input type="radio" name="correct_option_{{ idx }}" value="{{ o }}"
                class="option-radio"
                id="correct_{{ idx }}_{{ o }}"
-               {{ 'checked' if q and q.options.all()[o].is_correct }}>
+               {{ 'checked' if q.correct == o }}>
         <label for="correct_{{ idx }}_{{ o }}" class="option-radio-label" title="Mark as correct"></label>
         <input class="form-input option-text" type="text"
                name="option_text_{{ idx }}_{{ o }}"
-               value="{{ q.options.all()[o].text if q else '' }}"
-               placeholder="Option {{ o + 1 }}" required />
+               value="{{ q.options[o] }}"
+               placeholder="Option {{ o + 1 }}" maxlength="256" />
       </div>
     {% endfor %}
   </div>
-  <p class="option-hint">Select the radio button next to the correct answer.</p>
+  <p class="option-hint">Select the radio button next to the correct answer. Leave options 3 and 4 blank if you don't need them.</p>
 </div>
 {% endmacro %}
 
@@ -47,7 +49,7 @@
 
   <form method="POST" action="{{ action }}" id="quiz-form" novalidate>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-    <input type="hidden" name="question_count" id="question-count" value="{{ quiz.questions.count() if quiz else 1 }}" />
+    <input type="hidden" name="question_count" id="question-count" value="{{ form.questions | length }}" />
 
     <!-- ── Quiz Metadata ─────────────────────────────────────────── -->
     <div class="card quiz-meta-card">
@@ -57,13 +59,13 @@
         <div class="form-group">
           <label class="form-label" for="q-title">Title *</label>
           <input class="form-input" type="text" id="q-title" name="title"
-                 value="{{ quiz.title if quiz else '' }}"
+                 value="{{ form.title }}" maxlength="128"
                  placeholder="e.g. Science Trivia" required />
         </div>
         <div class="form-group">
           <label class="form-label" for="q-category">Category *</label>
           <input class="form-input" type="text" id="q-category" name="category"
-                 value="{{ quiz.category if quiz else 'General' }}"
+                 value="{{ form.category }}" maxlength="64"
                  placeholder="e.g. Science" required />
         </div>
       </div>
@@ -71,7 +73,7 @@
       <div class="form-group">
         <label class="form-label" for="q-desc">Description</label>
         <textarea class="form-input form-textarea" id="q-desc" name="description"
-                  placeholder="Short description shown on the quiz card…">{{ quiz.description if quiz else '' }}</textarea>
+                  placeholder="Short description shown on the quiz card…">{{ form.description }}</textarea>
       </div>
 
       <div class="form-row">
@@ -80,22 +82,37 @@
           <select class="form-input" id="q-difficulty" name="difficulty">
             {% for level in ['easy', 'medium', 'hard'] %}
               <option value="{{ level }}"
-                {{ 'selected' if (quiz and quiz.difficulty == level) or (not quiz and level == 'easy') }}>
+                {{ 'selected' if form.difficulty == level }}>
                 {{ level | title }}
               </option>
             {% endfor %}
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label" for="q-time">Time Limit (seconds) *</label>
-          <input class="form-input" type="number" id="q-time" name="time_limit_seconds"
-                 value="{{ quiz.time_limit_seconds if quiz else 180 }}" min="30" max="3600" />
+          <label class="form-label" for="q-question-time">Live game: seconds per question *</label>
+          <input class="form-input" type="number" id="q-question-time" name="question_seconds"
+                 value="{{ form.question_seconds }}" min="5" max="600" />
         </div>
+        <div class="form-group">
+          <label class="form-label" for="q-time">Self-paced: seconds for the whole quiz *</label>
+          <input class="form-input" type="number" id="q-time" name="time_limit_seconds"
+                 value="{{ form.time_limit_seconds }}" min="10" max="7200" />
+        </div>
+        {% if masters is defined %}
+        <div class="form-group">
+          <label class="form-label" for="q-owner">Quiz master *</label>
+          <select class="form-input" id="q-owner" name="owner_id">
+            {% for master in masters %}
+              <option value="{{ master.id }}" {{ 'selected' if form.owner_id == master.id }}>{{ master.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
         <div class="form-group form-group--checkbox">
           <input type="checkbox" id="q-published" name="is_published"
-                 {{ 'checked' if quiz and quiz.is_published }} />
+                 {{ 'checked' if form.is_published }} />
           <label class="form-label form-label--inline" for="q-published">
-            Publish immediately
+            Offer as a self-paced quiz (players see the answers, so leave off until your live game is over)
           </label>
         </div>
       </div>
@@ -103,17 +120,11 @@
 
     <!-- ── Questions ─────────────────────────────────────────────── -->
     <div id="questions-container">
-      {% if quiz and quiz.questions.count() > 0 %}
-        {% for q in quiz.questions %}
-          <div class="card question-block" data-index="{{ loop.index0 }}">
-            {{ _render_question(loop.index0, q) }}
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="card question-block" data-index="0">
-          {{ _render_question(0) }}
+      {% for q in form.questions %}
+        <div class="card question-block" data-index="{{ loop.index0 }}">
+          {{ _render_question(loop.index0, q) }}
         </div>
-      {% endif %}
+      {% endfor %}
     </div>
 
     <button type="button" class="btn btn--ghost" id="add-question-btn">+ Add Question</button>
@@ -121,7 +132,7 @@
     <div class="form-actions">
       <a href="{{ back_url|default(url_for('admin.dashboard')) }}" class="btn btn--ghost">Cancel</a>
       <button type="submit" class="btn btn--primary" id="save-quiz-btn">
-        {{ 'Update Quiz' if quiz else 'Create Quiz' }}
+        {{ 'Create Quiz' if is_new else 'Update Quiz' }}
       </button>
     </div>
   </form>
@@ -144,6 +155,7 @@ document.getElementById("add-question-btn").addEventListener("click", () => {
   const html = `
     <div class="card question-block" data-index="${idx}">
       <div class="question-block__inner">
+        <input type="hidden" class="question-id" name="question_id_${idx}" value="" />
         <div class="question-block__header">
           <span class="question-block__num">Question ${idx + 1}</span>
           <button type="button" class="btn btn--danger btn--xs remove-q-btn"
@@ -164,11 +176,11 @@ document.getElementById("add-question-btn").addEventListener("click", () => {
               <label for="correct_${idx}_${o}" class="option-radio-label" title="Mark as correct"></label>
               <input class="form-input option-text" type="text"
                      name="option_text_${idx}_${o}"
-                     placeholder="Option ${o + 1}" required />
+                     placeholder="Option ${o + 1}" maxlength="256" />
             </div>
           `).join("")}
         </div>
-        <p class="option-hint">Select the radio button next to the correct answer.</p>
+        <p class="option-hint">Select the radio button next to the correct answer. Leave options 3 and 4 blank if you don't need them.</p>
       </div>
     </div>`;
 
@@ -190,6 +202,8 @@ function reIndexQuestions() {
   document.querySelectorAll(".question-block").forEach((block, i) => {
     block.dataset.index = i;
     block.querySelector(".question-block__num").textContent = `Question ${i + 1}`;
+
+    block.querySelector(".question-id").name = `question_id_${i}`;
 
     const ta = block.querySelector(".question-text");
     if (ta) ta.name = `question_text_${i}`;
