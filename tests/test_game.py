@@ -2,6 +2,7 @@
 
 import time
 
+from app import socketio
 from app.models import GameSession, Option, Team, TeamAnswer, db
 from conftest import PASSWORD, Game
 
@@ -74,6 +75,27 @@ def test_reconnect_restores_question_and_answer(app, game):
     assert phone.connect().events()["sync_state"]["rankings"][0]["team_name"] == "Alpha"
 
 
+def host_screen(app, client, code):
+    socket = socketio.test_client(app, flask_test_client=client)
+    socket.emit("join_room", {"session_code": code})
+    return socket
+
+
+def test_live_counts_go_only_to_the_host(app, game, login):
+    host = host_screen(app, game.host, game.code)
+    rival = host_screen(app, login("rival"), game.code)
+    alpha, beta = game.phone("Alpha").connect(), game.phone("Beta").connect()
+    game.do("start")
+    alpha.answer(wrong_option(app, game.code))
+
+    received = [(event["name"], event["args"][0]) for event in host.get_received()]
+    assert ("team_joined", {"team_name": "Beta", "team_count": 2}) in received
+    assert ("answer_received", {"answers_in": 1, "total_teams": 2}) in received
+    others = list(beta.events()) + [event["name"] for event in rival.get_received()]
+    assert "question_pushed" in others
+    assert not {"answer_received", "team_joined"} & set(others)
+
+
 def test_one_answer_per_question(app, game):
     phone = game.phone("Alpha").connect()
     game.do("start")
@@ -90,6 +112,25 @@ def test_answers_after_the_deadline_are_refused(app, game):
         session.question_deadline = time.time() - 5
         db.session.commit()
     assert phone.answer(correct_option(app, game.code)) == {"ok": False, "reason": "closed"}
+
+
+def test_waiting_in_line_does_not_make_an_answer_late(app, game, monkeypatch):
+    from app.sockets import events
+
+    phone = game.phone("Alpha").connect()
+    game.do("start")
+    with app.app_context():
+        session = GameSession.query.one()
+        session.question_deadline = time.time() + 1  # with the grace: answers count for 2 s
+        db.session.commit()
+    record = events._record_answer
+
+    def after_a_queue(data, received_at):
+        time.sleep(2.5)
+        return record(data, received_at)
+
+    monkeypatch.setattr(events, "_record_answer", after_a_queue)
+    assert phone.answer(correct_option(app, game.code)) == {"ok": True}
 
 
 def test_answers_after_reveal_are_refused(app, game):

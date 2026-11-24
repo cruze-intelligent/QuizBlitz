@@ -7,13 +7,23 @@ handlers (manage_session=True, the default), so the server knows which team a so
 belongs to; a client can't act as another team by sending a different team_id.
 """
 
+import threading
+import time
+
 from flask import session
+from flask_login import current_user
 from flask_socketio import emit, join_room
 from sqlalchemy.exc import IntegrityError
 
 from app import socketio
 from app.game import sync_payload
-from app.models import GameSession, Option, Team, TeamAnswer, db
+from app.models import GameSession, Option, QuizMaster, Team, TeamAnswer, db
+
+
+# Answers are recorded one at a time. Each takes a few milliseconds, but when a whole room
+# taps at once, that many threads competing for the interpreter are several times slower
+# than taking turns. One lock is enough because the app runs as a single process.
+_answer_lock = threading.Lock()
 
 
 def _current_team(game_session: GameSession):
@@ -25,6 +35,20 @@ def _current_team(game_session: GameSession):
     if team is None or team.session_id != game_session.id:
         return None
     return team
+
+
+def _host_room(session_code: str) -> str:
+    """Room for the quiz master's own screens.
+
+    Live counts go only here. Sent to every phone, N answers would mean N x N messages,
+    which delays the answers still waiting when a whole room taps at once.
+    """
+    return f"{session_code}:host"
+
+
+def _is_host(game_session: GameSession) -> bool:
+    user = current_user._get_current_object()
+    return isinstance(user, QuizMaster) and game_session.quiz.created_by == user.id
 
 
 @socketio.on("join_room")
@@ -46,17 +70,25 @@ def handle_join_room(data=None):
     # Join before reading the state: anything that changes in between reaches this client
     # as an event, and the sequence number tells it which message is newer.
     join_room(session_code)
+    if _is_host(game_session):
+        join_room(_host_room(session_code))
     db.session.refresh(game_session)
 
     team = _current_team(game_session)
     emit("sync_state", sync_payload(game_session, team))
     if team is not None and game_session.state != "finished":
-        emit("team_joined", {"team_name": team.team_name, "team_count": game_session.team_count}, room=session_code)
+        emit("team_joined", {"team_name": team.team_name, "team_count": game_session.team_count}, room=_host_room(session_code))
 
 
 @socketio.on("submit_answer")
 def handle_submit_answer(data=None):
     """Record a team's answer. The return value is the acknowledgement the phone shows."""
+    received_at = time.time()
+    with _answer_lock:
+        return _record_answer(data, received_at)
+
+
+def _record_answer(data, received_at: float) -> dict:
     payload = data if isinstance(data, dict) else {}
     session_code = payload.get("session_code")
     option_id = payload.get("option_id")
@@ -67,7 +99,8 @@ def handle_submit_answer(data=None):
     team = _current_team(game_session) if game_session else None
     if team is None:
         return {"ok": False, "reason": "not_joined"}
-    if not game_session.accepts_answers():
+    # Judged by arrival time, so waiting for the lock can't make an answer late.
+    if not game_session.accepts_answers(received_at):
         return {"ok": False, "reason": "closed"}
 
     question = game_session.current_question()
@@ -93,6 +126,6 @@ def handle_submit_answer(data=None):
     emit(
         "answer_received",
         {"answers_in": answers_in, "total_teams": game_session.team_count},
-        room=session_code,
+        room=_host_room(session_code),
     )
     return {"ok": True}

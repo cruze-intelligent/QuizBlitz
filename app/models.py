@@ -192,26 +192,22 @@ class GameSession(db.Model):
             return None
         return max(0, int((self.question_deadline - time.time()) * 1000))
 
-    def accepts_answers(self) -> bool:
+    def accepts_answers(self, received_at: float) -> bool:
+        """Whether an answer that reached the server at `received_at` (Unix time) counts."""
         if self.state != "question":
             return False
-        return self.question_deadline is None or time.time() <= self.question_deadline + self.ANSWER_GRACE_SECONDS
+        return self.question_deadline is None or received_at <= self.question_deadline + self.ANSWER_GRACE_SECONDS
 
     @property
     def team_count(self) -> int:
         return self.teams.count()
 
     def current_question(self):
-        if not self.quiz_id:
-            return None
-        quiz = db.session.get(Quiz, self.quiz_id)
-        if not quiz:
-            return None
-        question_list = list(quiz.questions.order_by(Question.order_index).all())
-        if not question_list:
-            return None
-        idx = min(max(self.current_question_index, 0), len(question_list) - 1)
-        return question_list[idx]
+        questions = Question.query.filter_by(quiz_id=self.quiz_id)
+        index = max(self.current_question_index, 0)
+        question = questions.order_by(Question.order_index, Question.id).offset(index).first()
+        # Past the end (the quiz was shortened after this game): use the last question.
+        return question or questions.order_by(Question.order_index.desc(), Question.id.desc()).first()
 
     def answers_for(self, question):
         """This session's answers to `question`. Questions belong to the quiz, which can be
