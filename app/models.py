@@ -1,5 +1,6 @@
 """app/models.py — ORM models for the QuizBlitz app."""
 
+import time
 from datetime import datetime, timezone
 
 from flask_login import UserMixin
@@ -7,6 +8,12 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
+
+
+def find_account(email: str):
+    """The User or QuizMaster with this (lowercase) email. Both share one login form, so
+    an email must be unique across the two tables."""
+    return User.query.filter_by(email=email).first() or QuizMaster.query.filter_by(email=email).first()
 
 
 class User(UserMixin, db.Model):
@@ -22,6 +29,8 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     attempts = db.relationship("QuizAttempt", backref="user", lazy="dynamic")
+
+    is_master = False
 
     def get_id(self) -> str:
         # Prefixed so it can't collide with a QuizMaster that has the same numeric id.
@@ -52,6 +61,7 @@ class QuizMaster(UserMixin, db.Model):
 
     # Quiz masters are never site admins; defined so shared templates/guards can check it.
     is_admin = False
+    is_master = True
 
     def get_id(self) -> str:
         return f"master:{self.id}"
@@ -163,11 +173,29 @@ class GameSession(db.Model):
     quiz_id = db.Column(db.Integer, db.ForeignKey("quizzes.id"), nullable=False)
     state = db.Column(db.String(32), default="lobby", nullable=False)
     current_question_index = db.Column(db.Integer, default=0, nullable=False)
+    # Unix time when the open question stops accepting answers (None: no limit).
+    question_deadline = db.Column(db.Float)
     started_at = db.Column(db.DateTime)
     ended_at = db.Column(db.DateTime)
     qr_b64 = db.Column(db.Text)
 
     teams = db.relationship("Team", backref="session", lazy="dynamic", cascade="all, delete-orphan")
+
+    ACTIVE_STATES = ("lobby", "question", "reveal", "leaderboard")
+    IN_PROGRESS_STATES = ("question", "reveal", "leaderboard")
+    # Answers sent in the last moment still count after network delay.
+    ANSWER_GRACE_SECONDS = 1.0
+
+    def remaining_ms(self):
+        """Milliseconds left on the open question, or None when it has no limit."""
+        if self.question_deadline is None:
+            return None
+        return max(0, int((self.question_deadline - time.time()) * 1000))
+
+    def accepts_answers(self) -> bool:
+        if self.state != "question":
+            return False
+        return self.question_deadline is None or time.time() <= self.question_deadline + self.ANSWER_GRACE_SECONDS
 
     @property
     def team_count(self) -> int:
@@ -209,6 +237,10 @@ class Team(db.Model):
 
     def __repr__(self) -> str:
         return f"<Team {self.team_name}>"
+
+
+# One team per name in a session, ignoring case: a name can't be claimed twice.
+db.Index("uq_team_session_name_ci", Team.session_id, db.func.lower(Team.team_name), unique=True)
 
 
 class TeamAnswer(db.Model):

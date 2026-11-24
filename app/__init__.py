@@ -1,31 +1,30 @@
 """Flask application factory for QuizBlitz."""
 
 import logging
+import os
+import sqlite3
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-import click
-from flask import Flask, jsonify, redirect, url_for
+from flask import Flask, jsonify, redirect, render_template
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
+from flask_migrate import Migrate
 from flask_socketio import SocketIO
-from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import text
+from flask_wtf.csrf import CSRFError, CSRFProtect
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
+from werkzeug.middleware.proxy_fix import ProxyFix
 
-from config import config
-from app.models import (
-    db,
-    GameSession,
-    Option,
-    Question,
-    Quiz,
-    QuizMaster,
-    Team,
-    TeamAnswer,
-    User,
-)
+from app.models import QuizMaster, User, db
+from config import config, local_secret_key
 
+MIGRATIONS_DIR = str(Path(__file__).resolve().parent.parent / "migrations")
 
-socketio = SocketIO(async_mode="eventlet", cors_allowed_origins="*")
+# Plain threads: works with Werkzeug locally and Gunicorn's gthread worker in production.
+# No cors_allowed_origins: browsers may only connect from the site itself.
+socketio = SocketIO(async_mode="threading", max_http_buffer_size=100_000)
 
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
@@ -33,6 +32,8 @@ login_manager.login_message = "Please log in to access this page."
 login_manager.login_message_category = "warning"
 
 csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address)
+migrate = Migrate()
 
 
 @login_manager.user_loader
@@ -49,31 +50,44 @@ def load_user(user_id: str):
     return db.session.get(model, int(raw_id))
 
 
-def create_app(config_name: str = "default") -> Flask:
+@event.listens_for(Engine, "connect")
+def _configure_sqlite(dbapi_connection, _record):
+    """WAL lets phones read while an answer is being written; busy_timeout queues writers."""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=10000")
+        cursor.close()
+
+
+def create_app(config_name: str | None = None, **overrides) -> Flask:
+    config_name = config_name or os.environ.get("QUIZBLITZ_ENV") or "development"
+    if config_name not in config:
+        raise RuntimeError(f"Unknown QUIZBLITZ_ENV {config_name!r}; use one of: {', '.join(config)}.")
+
     app = Flask(__name__)
     app.config.from_object(config[config_name])
-
-    log_dir = Path(__file__).resolve().parent.parent / "logs"
-    log_dir.mkdir(exist_ok=True)
-    if not any(isinstance(handler, RotatingFileHandler) for handler in app.logger.handlers):
-        file_handler = RotatingFileHandler(log_dir / "quizblitz.log", maxBytes=1_048_576, backupCount=5, encoding="utf-8")
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        app.logger.addHandler(file_handler)
-    app.logger.setLevel(logging.INFO)
-    app.logger.propagate = False
+    app.config.update(overrides)
+    _check_secret_key(app, config_name)
+    _configure_logging(app)
 
     db.init_app(app)
+    migrate.init_app(app, db, directory=MIGRATIONS_DIR)
     login_manager.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
+    # Handlers must be registered before init_app: that way every app instance gets them.
+    from app.sockets import events  # noqa: F401
+
     socketio.init_app(app)
 
     from app.admin.routes import admin_bp
     from app.auth.routes import auth_bp
+    from app.cli import register_commands
     from app.master.routes import master_bp
     from app.play.routes import play_bp
     from app.quiz.routes import quiz_bp
-    from app.sockets import events  # noqa: F401
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(master_bp, url_prefix="/master")
@@ -88,24 +102,80 @@ def create_app(config_name: str = "default") -> Flask:
         return redirect(home_url())
 
     @app.route("/health")
+    @limiter.exempt
     def health():
         try:
             db.session.execute(text("SELECT 1"))
-            status = "ok"
-            db_state = "connected"
         except Exception:
-            status = "degraded"
-            db_state = "unavailable"
-        return jsonify({"status": status, "database": db_state})
+            return jsonify({"status": "degraded", "database": "unavailable"}), 503
+        return jsonify({"status": "ok", "database": "connected"})
 
+    @app.after_request
+    def security_headers(response):
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return response
+
+    _register_error_pages(app)
     _register_filters(app)
-    _register_commands(app)
+    register_commands(app)
 
-    with app.app_context():
-        db.create_all()
+    if app.config["BEHIND_PROXY"]:
+        # Trust exactly one proxy hop, so QR links use https://<public host> and rate
+        # limits see each visitor's address. The app must only be reachable via the proxy.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     app.logger.info("QuizBlitz started with %s configuration", config_name)
     return app
+
+
+def _check_secret_key(app: Flask, config_name: str) -> None:
+    """Anyone who knows SECRET_KEY can forge an admin login, so production must supply one."""
+    key = app.config["SECRET_KEY"]
+    if config_name == "production":
+        if not key or len(key) < 32 or key.startswith(("dev-", "change", "replace")):
+            raise RuntimeError(
+                "Production needs a private SECRET_KEY of at least 32 characters. Generate one with:\n"
+                '  python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+    elif not key:
+        app.config["SECRET_KEY"] = local_secret_key()
+
+
+def _configure_logging(app: Flask) -> None:
+    app.logger.setLevel(logging.INFO)
+    if app.config["LOG_DIR"]:
+        log_dir = Path(app.config["LOG_DIR"])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        if not any(isinstance(handler, RotatingFileHandler) for handler in app.logger.handlers):
+            handler = RotatingFileHandler(
+                log_dir / "quizblitz.log", maxBytes=1_048_576, backupCount=5, encoding="utf-8"
+            )
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            app.logger.addHandler(handler)
+    app.logger.propagate = False
+
+
+def _register_error_pages(app: Flask) -> None:
+    def page(status: int, title: str, message: str):
+        return render_template("error.html", title=title, message=message), status
+
+    @app.errorhandler(403)
+    def forbidden(_error):
+        return page(403, "Not allowed", "Your account doesn't have access to this page.")
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return page(404, "Page not found", "Check the link, or scan the QR code again.")
+
+    @app.errorhandler(429)
+    def too_many_requests(_error):
+        return page(429, "Too many attempts", "Please wait a few minutes, then try again.")
+
+    @app.errorhandler(CSRFError)
+    def csrf_failed(_error):
+        return page(400, "This page has expired", "Go back, refresh the page and try again.")
 
 
 def _register_filters(app: Flask) -> None:
@@ -117,100 +187,3 @@ def _register_filters(app: Flask) -> None:
     def avatar_color(index: int) -> str:
         hue = _AVATAR_HUES[(int(index) - 1) % len(_AVATAR_HUES)]
         return f"hsl({hue}, 65%, 45%)"
-
-
-def _register_commands(app: Flask) -> None:
-    """Attach CLI commands for local development and data seeding."""
-
-    @app.cli.command("seed-db")
-    def seed_db():
-        """Seed quiz master and sample quiz data for the live game."""
-        click.echo("[*] Seeding database ...")
-
-        db.session.query(TeamAnswer).delete()
-        db.session.query(Team).delete()
-        db.session.query(GameSession).delete()
-        db.session.query(Option).delete()
-        db.session.query(Question).delete()
-        db.session.query(Quiz).delete()
-        db.session.query(QuizMaster).delete()
-        db.session.query(User).delete()
-        db.session.commit()
-
-        master = QuizMaster(username="master", email="master@quizblitz.com")
-        master.set_password("master123")
-        db.session.add(master)
-        db.session.flush()
-
-        admin = User(username="admin", email="admin@quizblitz.com", is_admin=True)
-        admin.set_password("admin123")
-        db.session.add(admin)
-        db.session.flush()
-
-        quiz = Quiz(
-            title="General Knowledge",
-            description="A lively general knowledge challenge.",
-            category="General",
-            difficulty="easy",
-            time_limit_seconds=30,
-            is_published=True,
-            created_by=master.id,
-        )
-        db.session.add(quiz)
-        db.session.flush()
-
-        rounds = [
-            ("Science", [
-                {"text": "Which planet is known as the Red Planet?", "options": ["Venus", "Mars", "Jupiter", "Saturn"], "correct": 1},
-                {"text": "What gas do plants absorb from the atmosphere?", "options": ["Oxygen", "Nitrogen", "Carbon dioxide", "Helium"], "correct": 2},
-                {"text": "Which organ pumps blood around the body?", "options": ["Lungs", "Heart", "Liver", "Kidney"], "correct": 1},
-                {"text": "Which element has the chemical symbol O?", "options": ["Gold", "Oxygen", "Osmium", "Argon"], "correct": 1},
-                {"text": "What is the freezing point of water in Celsius?", "options": ["0", "10", "-10", "100"], "correct": 0},
-            ]),
-            ("History", [
-                {"text": "Who was the first President of the United States?", "options": ["Benjamin Franklin", "Thomas Jefferson", "George Washington", "John Adams"], "correct": 2},
-                {"text": "Which ancient civilization built Machu Picchu?", "options": ["Romans", "Maya", "Inca", "Greeks"], "correct": 2},
-                {"text": "The Great Fire of London happened in which year?", "options": ["1663", "1665", "1666", "1668"], "correct": 2},
-                {"text": "Who discovered penicillin?", "options": ["Marie Curie", "Alexander Fleming", "Isaac Newton", "Albert Einstein"], "correct": 1},
-                {"text": "Which empire built the Colosseum?", "options": ["Roman Empire", "Ottoman Empire", "Mongol Empire", "British Empire"], "correct": 0},
-            ]),
-            ("Sports", [
-                {"text": "How many players are on a standard soccer team on the field?", "options": ["9", "10", "11", "12"], "correct": 2},
-                {"text": "In tennis, what is the term for a score of zero?", "options": ["Love", "Draw", "Nil", "Blank"], "correct": 0},
-                {"text": "Which country hosted the 2016 Summer Olympics?", "options": ["China", "Brazil", "Japan", "Greece"], "correct": 1},
-                {"text": "Which sport uses the terms 'love', 'deuce', and 'advantage'?", "options": ["Cricket", "Tennis", "Golf", "Basketball"], "correct": 1},
-                {"text": "How many points is a touchdown worth in American football?", "options": ["3", "6", "7", "8"], "correct": 1},
-            ]),
-        ]
-
-        order_index = 0
-        for round_number, (round_name, questions) in enumerate(rounds, start=1):
-            for question_index, question_data in enumerate(questions, start=1):
-                question = Question(
-                    quiz_id=quiz.id,
-                    text=question_data["text"],
-                    round_number=round_number,
-                    order_in_round=question_index,
-                    order_index=order_index,
-                    time_limit_seconds=30,
-                    points=10,
-                )
-                db.session.add(question)
-                db.session.flush()
-
-                for option_index, option_text in enumerate(question_data["options"]):
-                    db.session.add(
-                        Option(
-                            question_id=question.id,
-                            text=option_text,
-                            is_correct=(option_index == question_data["correct"]),
-                            order_index=option_index,
-                        )
-                    )
-
-                order_index += 1
-
-        db.session.commit()
-        click.echo("[OK] Database seeded successfully!")
-        click.echo("   master@quizblitz.com / master123")
-        click.echo("   admin@quizblitz.com / admin123")

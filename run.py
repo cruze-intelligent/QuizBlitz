@@ -9,13 +9,14 @@ Environment:
     QUIZBLITZ_PORT   port (default 5000)
     QUIZBLITZ_DEBUG  1/true to enable debug mode (forces host 127.0.0.1, see below)
 
-Production: gunicorn --worker-class eventlet -w 1 run:app
+This is for a trusted local network. For the public site see DEPLOY.md.
 """
 
 import os
 import socket
 
 from app import create_app, socketio
+from app.cli import upgrade_database
 
 app = create_app()
 
@@ -51,9 +52,12 @@ def main() -> None:
     else:
         print(f"    Open http://{host}:{port}")
 
-    # socketio.run (not app.run): app.run starts Flask's plain dev server, which doesn't
-    # serve the eventlet Socket.IO transport, so live game updates wouldn't work.
-    socketio.run(app, host=host, port=port, debug=debug, use_reloader=debug)
+    upgrade_database(app)
+
+    # socketio.run (not app.run) also serves the Socket.IO transport, so live game updates work.
+    # allow_unsafe_werkzeug: this entry point is for a trusted local network. The public
+    # site runs wsgi.py under Gunicorn (see DEPLOY.md).
+    socketio.run(app, host=host, port=port, debug=debug, use_reloader=debug, allow_unsafe_werkzeug=True)
 
 
 if __name__ == "__main__":
