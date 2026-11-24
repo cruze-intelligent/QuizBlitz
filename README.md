@@ -1,65 +1,66 @@
 # QuizBlitz
 
-A lightweight, self-hosted quiz game inspired by Kahoot for local network play.
+A self-hosted live quiz game. A quiz master runs the game from a laptop or projector and
+teams join on their phones by scanning a QR code.
 
 ## Features
 
-- Quiz master dashboard for creating and running sessions
-- QR code join flow for team phones
-- Live question delivery via Flask-SocketIO
-- Theme-based scoring and leaderboard updates
-- Seed data for a demo quiz mastery flow
+- Quiz master dashboard for creating, editing and running quizzes
+- QR code join flow; phones resume where they were after a refresh or lost connection
+- Timed questions with live answer counts, reveals and leaderboards
+- Optional self-paced quizzes for registered players
 
 ## Local setup
 
-1. Create and activate a virtual environment.
-2. Install dependencies:
+Needs Python 3.11 or newer.
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+python -m venv .venv          # then activate it
+pip install -r requirements.txt
+flask init-db
+flask seed-db                 # optional demo data; prints one-time passwords
+python run.py
+```
 
-3. Seed the database:
+This serves on all network interfaces (port 5000) so phones on the same Wi-Fi can join,
+and prints the address to use. **Open the app on the quiz master's computer via that
+network address, not `localhost`**: the lobby QR code points at whatever address the
+browser used. On Windows, allow Python through the firewall when prompted.
 
-   ```bash
-   flask seed-db
-   ```
+Options (environment variables): `QUIZBLITZ_HOST`, `QUIZBLITZ_PORT`, and
+`QUIZBLITZ_DEBUG=1` for debug mode with auto-reload. Debug mode is forced onto
+`127.0.0.1` because its interactive debugger would let anyone on the network run code.
 
-4. Run the application:
+## Accounts
 
-   ```bash
-   python run.py
-   ```
+There are no default accounts.
 
-   This serves on all network interfaces (port 5000) so phones on the same Wi-Fi can
-   join, and prints the address to use. **Open the app on the quiz master's computer via
-   that network address, not `localhost`**: the lobby QR code points at whatever address
-   the browser used. On Windows, allow Python through the firewall when prompted.
+| Command | Purpose |
+|---|---|
+| `flask create-master` | Quiz master: creates quizzes and hosts games |
+| `flask create-admin` | Admin: manages all quizzes |
+| `flask set-password EMAIL` | Reset a password |
 
-   Options (environment variables): `QUIZBLITZ_HOST`, `QUIZBLITZ_PORT`, and
-   `QUIZBLITZ_DEBUG=1` for debug mode with auto-reload. Debug mode is forced onto
-   `127.0.0.1` because its interactive debugger would let anyone on the network run code.
+Public sign-up creates player accounts for self-paced quizzes. Teams in live games need
+no account.
 
-   For production, prefer:
+A quiz is hidden from players unless it is offered as self-paced, because the self-paced
+results page shows every answer.
 
-   ```bash
-   gunicorn --worker-class eventlet -w 1 run:app
-   ```
+## Tests
 
-## Default credentials
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests
+```
 
-- Quiz master: `master@quizblitz.com` / `master123`
-- Admin: `admin@quizblitz.com` / `admin123`
-- Dave: `dave@quizblitz.com` / `dave123`
+## Deployment
+
+See [DEPLOY.md](DEPLOY.md). `run.py` is for trusted local networks only.
 
 ## Operational notes
 
-This app uses Flask-SocketIO with the `eventlet` async worker for live sessions. The database is SQLite for local MVP development and is easy to swap to PostgreSQL later.
-
-Use the health check to verify the app and database are responsive:
-
-```bash
-curl http://localhost:5000/health
-```
-
-The app also writes operational activity to `logs/quizblitz.log` for session creation, quiz updates, and live gameplay actions.
+- Health check: `/health` (503 if the database is unavailable).
+- Logs: `logs/quizblitz.log` locally, the system journal in production.
+- After changing `app/models.py`, create a migration with `flask db migrate -m "..."` and
+  review it. `flask init-db` applies it.

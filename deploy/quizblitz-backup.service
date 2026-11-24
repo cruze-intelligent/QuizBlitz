@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up the QuizBlitz database
+
+[Service]
+Type=oneshot
+User=quizblitz
+Group=quizblitz
+ExecStart=/bin/sh /opt/quizblitz/deploy/backup.sh

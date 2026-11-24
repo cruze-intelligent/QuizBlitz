@@ -1,0 +1,2 @@
+# These run on Linux, where CRLF line endings break them.
+deploy/* text eol=lf

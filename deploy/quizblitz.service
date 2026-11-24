@@ -1,0 +1,26 @@
+[Unit]
+Description=QuizBlitz
+After=network.target
+
+[Service]
+User=quizblitz
+Group=quizblitz
+WorkingDirectory=/opt/quizblitz
+Environment=PYTHONUNBUFFERED=1
+# Creates or upgrades the database before every start.
+ExecStartPre=/opt/quizblitz/.venv/bin/flask --app wsgi init-db
+# One worker only: live rooms and rate limits live in its memory. Each phone holds a thread.
+ExecStart=/opt/quizblitz/.venv/bin/gunicorn --worker-class gthread --workers 1 --threads 200 --bind 127.0.0.1:8000 --timeout 60 --graceful-timeout 10 wsgi:app
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+
+StateDirectory=quizblitz
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
