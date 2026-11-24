@@ -77,7 +77,7 @@
 </section>
 
 <!-- Embed question data for quiz.js — NO is_correct field present -->
-<script id="questions-data" type="application/json">{{ questions_json | safe }}</script>
+<script id="questions-data" type="application/json">{{ questions | tojson }}</script>
 {% endblock %}
 
 {% block scripts %}

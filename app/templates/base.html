@@ -43,10 +43,17 @@
       <ul class="nav-links" role="list">
         {% if current_user.is_authenticated %}
           <li>
+            {% if current_user.is_master %}
+            <a href="{{ url_for('master.dashboard') }}"
+               class="nav-link {% if request.blueprint == 'master' %}nav-link--active{% endif %}">
+              Dashboard
+            </a>
+            {% else %}
             <a href="{{ url_for('quiz.lobby') }}"
                class="nav-link {% if request.blueprint == 'quiz' %}nav-link--active{% endif %}">
               Quizzes
             </a>
+            {% endif %}
           </li>
 
           {% if current_user.is_admin %}

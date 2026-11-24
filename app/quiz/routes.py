@@ -18,10 +18,21 @@ from flask import (
 from flask_login import login_required, current_user
 from sqlalchemy import func
 
-from app.models import db, Quiz, Question, Option, QuizAttempt
+from app.models import db, Quiz, QuizAttempt, QuizMaster
 from app.quiz.utils import calculate_score, format_time
 
 quiz_bp = Blueprint("quiz", __name__)
+
+
+@quiz_bp.before_request
+@login_required
+def _players_only():
+    """Self-paced attempts belong to Users. QuizMaster ids overlap with User ids, so an
+    attempt by a quiz master would be recorded against somebody else's account."""
+    if isinstance(current_user._get_current_object(), QuizMaster):
+        flash("Self-paced quizzes are for player accounts.", "warning")
+        return redirect(url_for("master.dashboard"))
+    return None
 
 
 # ── Lobby ──────────────────────────────────────────────────────────────────
@@ -115,7 +126,7 @@ def play(quiz_id: int):
     return render_template(
         "quiz/play.html",
         quiz=quiz,
-        questions_json=json.dumps(questions_data),
+        questions=questions_data,
         title=quiz.title,
     )
 
@@ -139,6 +150,8 @@ def submit(quiz_id: int):
     try:
         answers = json.loads(raw)
     except (ValueError, TypeError):
+        answers = {}
+    if not isinstance(answers, dict):
         answers = {}
 
     # ── Server-side scoring ------------------------------------------------
@@ -180,7 +193,7 @@ def results(quiz_id: int):
     quiz = Quiz.query.filter_by(id=quiz_id, is_published=True).first_or_404()
 
     attempt_id = request.args.get("attempt_id", type=int)
-    attempt = db.session.get(QuizAttempt, attempt_id)
+    attempt = db.session.get(QuizAttempt, attempt_id) if attempt_id else None
 
     # Guard: only the attempt owner may view this page
     if not attempt or attempt.user_id != current_user.id or attempt.quiz_id != quiz_id:
