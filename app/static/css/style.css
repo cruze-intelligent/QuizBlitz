@@ -1475,6 +1475,14 @@ select.form-input option { background: var(--clr-bg-3); }
   .rank-move { font-size: 0.9rem; }
 }
 
+.rank-row--mine { outline: 2px solid var(--clr-cyan); outline-offset: 1px; }
+.badge[hidden], .rank-list[hidden], .timer-bar[hidden] { display: none; }  /* their display rules beat [hidden] */
+
+/* Open games on the quiz master's dashboard */
+.session-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-sm); margin-top: var(--space-md); }
+.session-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-sm); }
+.session-row__name { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+
 /* Primary action: full width for the thumb on phones, right-aligned on larger screens */
 .screen-actions { display: flex; flex-direction: column; gap: var(--space-sm); }
 .screen-actions form, .screen-actions .btn { width: 100%; }

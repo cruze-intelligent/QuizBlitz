@@ -1,7 +1,8 @@
-from collections import Counter
-from datetime import datetime, timezone
 import base64
 import io
+import secrets
+import time
+from datetime import datetime, timezone
 
 import qrcode
 from flask import Blueprint, abort, current_app, flash, redirect, render_template, request, url_for
@@ -9,7 +10,8 @@ from flask_login import current_user, login_required
 from sqlalchemy import case, func
 
 from app import socketio
-from app.models import GameSession, Option, Quiz, QuizAttempt, QuizMaster, Team, TeamAnswer, db
+from app.game import public_rankings, question_payload, rankings, reveal_payload, reveal_summary, sequence
+from app.models import GameSession, Option, Quiz, QuizAttempt, QuizMaster, Team, db
 from app.quiz import editor
 
 master_bp = Blueprint("master", __name__)
@@ -59,12 +61,10 @@ def _transition(game_session: GameSession, from_states, to_state: str, **fields)
 
 
 def _generate_session_code() -> str:
-    import random
-    import string
-
-    alphabet = string.ascii_uppercase + string.digits
+    # No 0/O or 1/I: codes get read off a projector and typed on a phone.
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     while True:
-        code = "".join(random.choice(alphabet) for _ in range(6))
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
         if not db.session.query(GameSession).filter_by(session_code=code).first():
             return code
 
@@ -96,9 +96,17 @@ def dashboard():
         "avg_score": average_score,
     }
 
+    active_sessions = (
+        GameSession.query.join(Quiz)
+        .filter(Quiz.created_by == current_user.id, GameSession.state.in_(GameSession.ACTIVE_STATES))
+        .order_by(GameSession.id.desc())
+        .all()
+    )
+
     return render_template(
         "master/dashboard.html",
         quizzes=quizzes,
+        active_sessions=active_sessions,
         stats=stats,
         search=search,
         title="Master Dashboard",
@@ -219,7 +227,7 @@ def session_screen(code: str):
         return redirect(url_for("master.lobby", code=code))
 
     question = game_session.current_question()
-    if question is None:
+    if question is None and game_session.state != "finished":
         abort(404)
     total = game_session.quiz.question_count
     context = {
@@ -236,14 +244,20 @@ def session_screen(code: str):
         # Display only: the projector is visible to the teams, so no answer key here.
         options = question.options.order_by(Option.order_index).all()
         answers_in = game_session.answers_for(question).count()
-        return render_template("master/question.html", options=options, answers_in=answers_in, **context)
+        return render_template(
+            "master/question.html",
+            options=options,
+            answers_in=answers_in,
+            remaining_ms=game_session.remaining_ms(),
+            **context,
+        )
 
     if game_session.state == "reveal":
-        return render_template("master/reveal.html", reveal=_reveal_summary(game_session, question), **context)
+        return render_template("master/reveal.html", reveal=reveal_summary(game_session, question), **context)
 
     return render_template(
         "master/leaderboard.html",
-        rankings=_rankings(game_session),
+        rankings=rankings(game_session),
         is_final=game_session.state == "finished",
         **context,
     )
@@ -273,13 +287,7 @@ def start_session(code: str):
         flash("This quiz has no questions.", "warning")
         return _screen(code)
 
-    started = _transition(
-        game_session,
-        ["lobby"],
-        "question",
-        current_question_index=0,
-        started_at=datetime.now(timezone.utc),
-    )
+    started = _open_question(game_session, "lobby", 0, started_at=datetime.now(timezone.utc))
     if not started:
         flash("This session has already started.", "warning")
         return _screen(code)
@@ -288,6 +296,47 @@ def start_session(code: str):
     socketio.emit("session_started", {}, room=code)
     _push_question(game_session)
     return _screen(code)
+
+
+def _open_question(game_session: GameSession, from_state: str, index: int, **fields) -> bool:
+    """Move to QUESTION at `index` and start its clock."""
+    questions = game_session.quiz.questions.all()
+    seconds = questions[index].time_limit_seconds
+    return _transition(
+        game_session,
+        [from_state],
+        "question",
+        current_question_index=index,
+        question_deadline=time.time() + seconds if seconds else None,
+        **fields,
+    )
+
+
+def _push_question(game_session: GameSession) -> None:
+    question = game_session.current_question()
+    if question:
+        payload = question_payload(game_session, question)
+        socketio.emit("question_pushed", payload, room=game_session.session_code)
+
+
+def _finish(game_session: GameSession, from_states) -> bool:
+    if not _transition(game_session, from_states, "finished", ended_at=datetime.now(timezone.utc)):
+        return False
+    code = game_session.session_code
+    current_app.logger.info("Session %s finished by %s", code, current_user.username)
+    payload = {"seq": sequence(game_session), "final_rankings": public_rankings(game_session)}
+    socketio.emit("session_finished", payload, room=code)
+    return True
+
+
+@master_bp.route("/session/<code>/end", methods=["POST"])
+@login_required
+def end_session(code: str):
+    """Close a game early (or an unused lobby). Scores so far become the final results."""
+    game_session = _get_owned_session(code)
+    if _finish(game_session, GameSession.ACTIVE_STATES):
+        flash(f"Game {code} ended.", "success")
+    return redirect(url_for("master.dashboard"))
 
 
 @master_bp.route("/session/<code>/reveal", methods=["POST"])
@@ -311,11 +360,7 @@ def reveal_answer(code: str):
     db.session.commit()
     current_app.logger.info("Answer revealed for session %s on question %s", code, question.id)
 
-    summary = _reveal_summary(game_session, question)
-    payload = {key: summary[key] for key in (
-        "correct_option_id", "correct_option_text", "passed_count", "failed_count", "team_results",
-    )}
-    socketio.emit("answer_revealed", payload, room=code)
+    socketio.emit("answer_revealed", reveal_payload(game_session, question), room=code)
     return _screen(code)
 
 
@@ -328,8 +373,8 @@ def next_question(code: str):
 
     if game_session.state == "reveal":
         if _transition(game_session, ["reveal"], "leaderboard"):
-            rankings = _public_rankings(_rankings(game_session))
-            socketio.emit("leaderboard_updated", {"rankings": rankings}, room=code)
+            payload = {"seq": sequence(game_session), "rankings": public_rankings(game_session)}
+            socketio.emit("leaderboard_updated", payload, room=code)
         return _screen(code)
 
     if game_session.state != "leaderboard":
@@ -343,105 +388,9 @@ def next_question(code: str):
 
     next_index = game_session.current_question_index + 1
     if next_index >= question_total:
-        if _transition(game_session, ["leaderboard"], "finished", ended_at=datetime.now(timezone.utc)):
-            current_app.logger.info("Session %s finished by %s", code, current_user.username)
-            final_rankings = _public_rankings(_rankings(game_session))
-            socketio.emit("session_finished", {"final_rankings": final_rankings}, room=code)
+        _finish(game_session, ["leaderboard"])
         return _screen(code)
 
-    if _transition(game_session, ["leaderboard"], "question", current_question_index=next_index):
+    if _open_question(game_session, "leaderboard", next_index):
         _push_question(game_session)
     return _screen(code)
-
-
-def _push_question(game_session: GameSession):
-    question = game_session.current_question()
-    if not question:
-        return
-    payload = {
-        "question_text": question.text,
-        "options": [{"id": option.id, "text": option.text} for option in question.options.order_by(Option.order_index).all()],
-        "round": question.round_number,
-        "question_num": question.order_in_round,
-        "total_questions": game_session.quiz.question_count,
-        "time_limit_seconds": question.time_limit_seconds,
-    }
-    socketio.emit("question_pushed", payload, room=game_session.session_code)
-
-
-def _reveal_summary(game_session: GameSession, question) -> dict:
-    """Results for a revealed question: correct option, per-option pick counts and
-    each team's outcome. Teams that didn't answer count as failed (spec)."""
-    correct = question.correct_option
-    answers = {answer.team_id: answer for answer in game_session.answers_for(question).all()}
-    picks = Counter(answer.option_id for answer in answers.values())
-
-    team_results = []
-    for team in game_session.teams.order_by(Team.joined_at.asc()).all():
-        answer = answers.get(team.id)
-        team_results.append({
-            "team_name": team.team_name,
-            "is_correct": bool(answer and answer.is_correct),
-            "answered": answer is not None,
-        })
-    passed = sum(result["is_correct"] for result in team_results)
-
-    return {
-        "correct_option_id": correct.id if correct else None,
-        "correct_option_text": correct.text if correct else "",
-        "passed_count": passed,
-        "failed_count": len(team_results) - passed,
-        "team_results": team_results,
-        "options": [
-            {"id": option.id, "text": option.text, "is_correct": option.is_correct, "count": picks.get(option.id, 0)}
-            for option in question.options.order_by(Option.order_index).all()
-        ],
-    }
-
-
-def _rankings(game_session: GameSession) -> list[dict]:
-    """Leaderboard rows, best first.
-
-    - rank: standard competition ranking, so tied scores share a rank (1, 1, 3).
-    - score_delta: points gained on the most recently revealed question.
-    - prev_index / movement: position and rank change versus the standings before that
-      question, used to animate rows into their new order. There are no previous
-      standings before the first question, so nothing moves then.
-    """
-    teams = game_session.teams.order_by(Team.joined_at.asc()).all()
-    question = game_session.current_question()
-    gained = {}
-    if question is not None and game_session.state in ("reveal", "leaderboard", "finished"):
-        correct_answers = game_session.answers_for(question).filter(TeamAnswer.is_correct.is_(True))
-        gained = {answer.team_id: question.points for answer in correct_answers}
-    has_previous = game_session.current_question_index > 0
-
-    rows = []
-    for team in teams:
-        delta = gained.get(team.id, 0)
-        rows.append({"team_name": team.team_name, "score": team.score, "delta": delta, "prev_score": team.score - delta})
-    # sorted() is stable, so equal scores keep join order (then previous position).
-    for index, row in enumerate(sorted(rows, key=lambda r: -r["prev_score"])):
-        row["prev_index"] = index
-    ordered = sorted(rows, key=lambda r: (-r["score"], r["prev_index"]))
-
-    scores = [row["score"] for row in rows]
-    prev_scores = [row["prev_score"] for row in rows]
-    rankings = []
-    for index, row in enumerate(ordered):
-        rank = 1 + sum(score > row["score"] for score in scores)
-        prev_rank = 1 + sum(score > row["prev_score"] for score in prev_scores)
-        rankings.append({
-            "rank": rank,
-            "team_name": row["team_name"],
-            "score": row["score"],
-            "score_delta": row["delta"],
-            "prev_index": row["prev_index"] if has_previous else index,
-            "movement": (prev_rank - rank) if has_previous else 0,
-        })
-    return rankings
-
-
-def _public_rankings(rankings: list[dict]) -> list[dict]:
-    """Rankings in the socket payload shape from the spec."""
-    return [{key: row[key] for key in ("rank", "team_name", "score", "score_delta")} for row in rankings]

@@ -4,6 +4,8 @@
 document.addEventListener('DOMContentLoaded', () => {
   animateLeaderboard();
 
+  startQuestionTimer();
+
   const root = document.querySelector('[data-session-code]');
   if (!root || typeof io === 'undefined') return;
   const room = root.dataset.sessionCode;
@@ -37,6 +39,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const bar = document.querySelector('[data-answer-bar]');
     if (bar) bar.style.width = `${totalTeams ? Math.round((payload.answers_in / totalTeams) * 100) : 0}%`;
   });
+});
+
+// Count down the open question, then reveal it automatically (the button works earlier).
+// The extra wait lets answers sent in the last second arrive first.
+function startQuestionTimer() {
+  const bar = document.querySelector('[data-question-timer]');
+  const form = document.querySelector('[data-reveal-form]');
+  if (!bar || !form || bar.dataset.remainingMs === '') return;
+  createCountdown(bar).start(Number(bar.dataset.remainingMs), Number(bar.dataset.totalSeconds), () => {
+    setTimeout(() => form.requestSubmit(), 1500);
+  });
+}
+
+// A page restored by the Back button would run an old timer; load the current screen instead.
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && document.querySelector('[data-question-timer]')) window.location.reload();
 });
 
 // FLIP: render rows in their new order, start each at its previous position, then let

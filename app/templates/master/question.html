@@ -12,6 +12,13 @@
       <span class="badge badge--muted">{{ question.points }} pts</span>
     </div>
 
+    <div class="timer-bar" data-question-timer role="timer" aria-label="Time remaining" hidden
+         data-remaining-ms="{{ remaining_ms if remaining_ms is not none else '' }}"
+         data-total-seconds="{{ question.time_limit_seconds }}">
+      <div class="timer-bar__track"><div class="timer-bar__fill" data-timer-fill></div></div>
+      <div class="timer-display" data-timer-text></div>
+    </div>
+
     <h1 class="master-question-text">{{ question.text }}</h1>
 
     {# Display only — no correct-answer marking: teams can see this screen. #}
@@ -32,7 +39,7 @@
     </div>
 
     <div class="screen-actions">
-      <form action="{{ url_for('master.reveal_answer', code=session.session_code) }}" method="POST">
+      <form action="{{ url_for('master.reveal_answer', code=session.session_code) }}" method="POST" data-reveal-form>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button class="btn btn--warning btn--lg" type="submit">Reveal answer</button>
       </form>
@@ -42,6 +49,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/vendor/socket.io-4.7.2.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/countdown.js') }}"></script>
 <script src="{{ url_for('static', filename='js/master.js') }}"></script>
 {% endblock %}

@@ -50,6 +50,26 @@
     {% endif %}
   </div>
 
+  {% if active_sessions %}
+  <div class="card">
+    <h2>Open games</h2>
+    <ul class="session-list">
+      {% for game in active_sessions %}
+        <li class="session-row">
+          <span class="session-row__name"><strong>{{ game.session_code }}</strong> · {{ game.quiz.title }}</span>
+          <span class="badge badge--muted">{{ 'Lobby' if game.state == 'lobby' else 'In progress' }}</span>
+          <a class="btn btn--primary btn--sm" href="{{ url_for('master.session_screen', code=game.session_code) }}">Open</a>
+          <form action="{{ url_for('master.end_session', code=game.session_code) }}" method="POST"
+                onsubmit="return confirm('End this game for everyone?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button class="btn btn--danger btn--sm" type="submit">End</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
   <div class="card filter-card">
     <div class="filter-header">
       <h2>Your quizzes</h2>
@@ -74,11 +94,12 @@
           <p class="quiz-card__desc">{{ quiz.description or 'No description provided.' }}</p>
           <div class="quiz-card__stats">
             <div class="stat"><span class="stat-icon">❓</span> {{ quiz.question_count }} Qs</div>
-            <div class="stat"><span class="stat-icon">⏱</span> {{ quiz.time_limit_seconds }}s</div>
+            {% set first_question = quiz.questions.first() %}
+            {% if first_question %}
+            <div class="stat"><span class="stat-icon">⏱</span> {{ first_question.time_limit_seconds }}s each</div>
+            {% endif %}
           </div>
-          <a href="{{ url_for('master.lobby', code=quiz.sessions.first().session_code) if quiz.sessions.first() else '#' }}" class="btn btn--ghost btn--sm quiz-card__cta">
-            {{ 'Open session' if quiz.sessions.first() else 'No active session' }}
-          </a>
+          <a href="{{ url_for('master.edit_quiz', quiz_id=quiz.id) }}" class="btn btn--ghost btn--sm quiz-card__cta">Edit</a>
         </article>
       {% else %}
         <div class="empty-state">

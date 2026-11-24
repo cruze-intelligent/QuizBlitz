@@ -12,6 +12,7 @@ from flask_socketio import emit, join_room
 from sqlalchemy.exc import IntegrityError
 
 from app import socketio
+from app.game import sync_payload
 from app.models import GameSession, Option, Team, TeamAnswer, db
 
 
@@ -28,7 +29,7 @@ def _current_team(game_session: GameSession):
 
 @socketio.on("join_room")
 def handle_join_room(data=None):
-    """Subscribe to a session's room.
+    """Subscribe to a session's room and send this client the current screen.
 
     Anyone with the code may listen (the master screen, spectators): room events carry
     no answer key before reveal. If this connection is a joined team, announce it.
@@ -42,46 +43,51 @@ def handle_join_room(data=None):
     if not game_session:
         return
 
+    # Join before reading the state: anything that changes in between reaches this client
+    # as an event, and the sequence number tells it which message is newer.
     join_room(session_code)
+    db.session.refresh(game_session)
 
     team = _current_team(game_session)
-    if team is not None:
+    emit("sync_state", sync_payload(game_session, team))
+    if team is not None and game_session.state != "finished":
         emit("team_joined", {"team_name": team.team_name, "team_count": game_session.team_count}, room=session_code)
 
 
 @socketio.on("submit_answer")
 def handle_submit_answer(data=None):
+    """Record a team's answer. The return value is the acknowledgement the phone shows."""
     payload = data if isinstance(data, dict) else {}
     session_code = payload.get("session_code")
     option_id = payload.get("option_id")
     if not isinstance(session_code, str) or not isinstance(option_id, int) or isinstance(option_id, bool):
-        return
+        return {"ok": False, "reason": "invalid"}
 
     game_session = GameSession.query.filter_by(session_code=session_code).first()
-    if not game_session or game_session.state != "question":
-        return
-
-    team = _current_team(game_session)
+    team = _current_team(game_session) if game_session else None
     if team is None:
-        return
+        return {"ok": False, "reason": "not_joined"}
+    if not game_session.accepts_answers():
+        return {"ok": False, "reason": "closed"}
 
     question = game_session.current_question()
-    if question is None:
-        return
-
     option = db.session.get(Option, option_id)
-    if option is None or option.question_id != question.id:
-        return
+    if question is None or option is None or option.question_id != question.id:
+        return {"ok": False, "reason": "invalid"}
 
-    # One answer per team per question. The DB unique constraint is the real guard;
-    # catching IntegrityError covers two near-simultaneous taps that both pass a pre-check.
-    answer = TeamAnswer(team_id=team.id, question_id=question.id, option_id=option.id, is_correct=bool(option.is_correct))
-    db.session.add(answer)
+    # is_correct stays False until the reveal scores it: an answer that slips in while the
+    # reveal is running can then never be shown as correct without its points.
+    team_id, question_id = team.id, question.id
+    db.session.add(TeamAnswer(team_id=team_id, question_id=question_id, option_id=option.id))
+
+    # One answer per team per question. The DB unique constraint is the real guard, and
+    # also covers two near-simultaneous taps.
     try:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        return
+        existing = TeamAnswer.query.filter_by(team_id=team_id, question_id=question_id).first()
+        return {"ok": False, "reason": "duplicate", "option_id": existing.option_id if existing else None}
 
     answers_in = game_session.answers_for(question).count()
     emit(
@@ -89,3 +95,4 @@ def handle_submit_answer(data=None):
         {"answers_in": answers_in, "total_teams": game_session.team_count},
         room=session_code,
     )
+    return {"ok": True}
