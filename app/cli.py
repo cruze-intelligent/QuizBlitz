@@ -4,6 +4,7 @@
     flask create-master   add a quiz master (hosts live games)
     flask create-admin    add a site admin
     flask set-password    reset the password for an existing account
+    flask add-quizzes     give a quiz master the ready-made quizzes
     flask seed-db         demo data for local development only
 """
 
@@ -15,6 +16,7 @@ from flask import Flask
 from sqlalchemy import inspect
 
 from app.models import Option, Question, Quiz, QuizMaster, User, db, find_account
+from app.quiz_library import QUIZ_LIBRARY
 
 MIN_PASSWORD_LENGTH = 10
 BASELINE_REVISION = "0001"
@@ -92,9 +94,27 @@ def register_commands(app: Flask) -> None:
         db.session.commit()
         click.echo(f"[OK] Password changed for {account.email}.")
 
+    @app.cli.command("add-quizzes")
+    @click.option("--master", "email", prompt="Quiz master email", help="Who will own the quizzes.")
+    @click.option("--publish", is_flag=True, help="Publish them now instead of adding drafts.")
+    def add_quizzes(email, publish):
+        """Give a quiz master the ready-made quizzes they don't have yet."""
+        master = QuizMaster.query.filter_by(email=email.strip().lower()).first()
+        if master is None:
+            raise click.ClickException(f"No quiz master uses {email}.")
+        existing = {quiz.title for quiz in master.quizzes}
+        added = [_add_quiz(master, spec, publish).title for spec in QUIZ_LIBRARY if spec["title"] not in existing]
+        if not added:
+            click.echo(f"{master.username} already has every ready-made quiz.")
+            return
+        state = "published" if publish else "drafts"
+        click.echo(f"[OK] Added {len(added)} quizzes for {master.username} ({state}):")
+        for title in added:
+            click.echo(f"   {title}")
+
     @app.cli.command("seed-db")
     def seed_db():
-        """Add demo accounts and a sample quiz to an empty local database."""
+        """Add demo accounts and the ready-made quizzes to an empty local database."""
         if os.environ.get("QUIZBLITZ_ENV") == "production" or app.config["BEHIND_PROXY"]:
             raise click.ClickException("seed-db is for local development only. Use create-master instead.")
         if User.query.first() or QuizMaster.query.first() or Quiz.query.first():
@@ -103,73 +123,32 @@ def register_commands(app: Flask) -> None:
         master_password, admin_password = secrets.token_urlsafe(9), secrets.token_urlsafe(9)
         _create_account(QuizMaster, "master", "master@quizblitz.com", master_password)
         _create_account(User, "admin", "admin@quizblitz.com", admin_password, is_admin=True)
-        _add_sample_quiz(QuizMaster.query.filter_by(username="master").one())
+        master = QuizMaster.query.filter_by(username="master").one()
+        for spec in QUIZ_LIBRARY:
+            _add_quiz(master, spec)
 
         click.echo("[OK] Database seeded. These passwords are shown only once:")
         click.echo(f"   master@quizblitz.com / {master_password}")
         click.echo(f"   admin@quizblitz.com / {admin_password}")
 
 
-# (question, options, index of the correct option)
-_SAMPLE_ROUNDS = [
-    # Science
-    [
-        ("Which planet is known as the Red Planet?", ["Venus", "Mars", "Jupiter", "Saturn"], 1),
-        ("What gas do plants absorb from the atmosphere?", ["Oxygen", "Nitrogen", "Carbon dioxide", "Helium"], 2),
-        ("Which organ pumps blood around the body?", ["Lungs", "Heart", "Liver", "Kidney"], 1),
-        ("Which element has the chemical symbol O?", ["Gold", "Oxygen", "Osmium", "Argon"], 1),
-        ("What is the freezing point of water in Celsius?", ["0", "10", "-10", "100"], 0),
-    ],
-    # History
-    [
-        (
-            "Who was the first President of the United States?",
-            ["Benjamin Franklin", "Thomas Jefferson", "George Washington", "John Adams"],
-            2,
-        ),
-        ("Which ancient civilization built Machu Picchu?", ["Romans", "Maya", "Inca", "Greeks"], 2),
-        ("The Great Fire of London happened in which year?", ["1663", "1665", "1666", "1668"], 2),
-        (
-            "Who discovered penicillin?",
-            ["Marie Curie", "Alexander Fleming", "Isaac Newton", "Albert Einstein"],
-            1,
-        ),
-        (
-            "Which empire built the Colosseum?",
-            ["Roman Empire", "Ottoman Empire", "Mongol Empire", "British Empire"],
-            0,
-        ),
-    ],
-    # Sports
-    [
-        ("How many players are on a standard soccer team on the field?", ["9", "10", "11", "12"], 2),
-        ("In tennis, what is the term for a score of zero?", ["Love", "Draw", "Nil", "Blank"], 0),
-        ("Which country hosted the 2016 Summer Olympics?", ["China", "Brazil", "Japan", "Greece"], 1),
-        (
-            "Which sport uses the terms 'love', 'deuce', and 'advantage'?",
-            ["Cricket", "Tennis", "Golf", "Basketball"],
-            1,
-        ),
-        ("How many points is a touchdown worth in American football?", ["3", "6", "7", "8"], 1),
-    ],
-]
-
-
-def _add_sample_quiz(master: QuizMaster) -> None:
+def _add_quiz(master: QuizMaster, spec: dict, publish: bool = False) -> Quiz:
+    """Add one quiz from the library (see app/quiz_library.py) for this quiz master."""
+    question_count = sum(len(questions) for questions in spec["rounds"])
     quiz = Quiz(
-        title="General Knowledge",
-        description="A lively general knowledge challenge.",
-        category="General",
-        difficulty="easy",
-        time_limit_seconds=450,
-        is_published=False,
+        title=spec["title"],
+        description=spec["description"],
+        category=spec["category"],
+        difficulty=spec["difficulty"],
+        time_limit_seconds=30 * question_count,
+        is_published=publish,
         created_by=master.id,
     )
     db.session.add(quiz)
     db.session.flush()
 
     order_index = 0
-    for round_number, questions in enumerate(_SAMPLE_ROUNDS, start=1):
+    for round_number, questions in enumerate(spec["rounds"], start=1):
         for order_in_round, (question_text, options, correct) in enumerate(questions, start=1):
             question = Question(
                 quiz_id=quiz.id,
@@ -191,3 +170,8 @@ def _add_sample_quiz(master: QuizMaster) -> None:
                 )
             order_index += 1
     db.session.commit()
+    return quiz
+
+
+def _add_sample_quiz(master: QuizMaster) -> None:
+    _add_quiz(master, QUIZ_LIBRARY[0])

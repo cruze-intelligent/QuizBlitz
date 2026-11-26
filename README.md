@@ -40,6 +40,7 @@ There are no default accounts.
 | `flask create-master` | Quiz master: creates quizzes and hosts games |
 | `flask create-admin` | Admin: manages all quizzes |
 | `flask set-password EMAIL` | Reset a password |
+| `flask add-quizzes --master EMAIL` | Give a quiz master 9 ready-made quizzes as drafts (`--publish` to publish them) |
 
 Public sign-up creates player accounts for self-paced quizzes. Teams in live games need
 no account.

@@ -69,6 +69,7 @@ There are no default accounts. Each command asks for a password (10+ characters)
 cd /opt/quizblitz
 sudo -u quizblitz .venv/bin/flask --app wsgi create-master
 sudo -u quizblitz .venv/bin/flask --app wsgi create-admin
+sudo -u quizblitz .venv/bin/flask --app wsgi add-quizzes --master you@example.com   # ready-made quizzes, as drafts
 sudo -u quizblitz .venv/bin/flask --app wsgi set-password someone@example.com   # if forgotten
 ```
 

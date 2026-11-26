@@ -315,3 +315,34 @@ def test_upgrade_matches_models_and_keeps_old_data(tmp_path):
 
 def test_health(app):
     assert app.test_client().get("/health").json == {"status": "ok", "database": "connected"}
+
+
+# ── Ready-made quizzes ─────────────────────────────────────────────────────
+
+def test_quiz_library_is_well_formed():
+    from app.quiz.editor import MAX_QUESTIONS
+    from app.quiz_library import QUIZ_LIBRARY
+
+    titles = [spec["title"] for spec in QUIZ_LIBRARY]
+    assert len(titles) == len(set(titles))
+    for spec in QUIZ_LIBRARY:
+        assert spec["difficulty"] in Quiz.DIFFICULTY_CHOICES and len(spec["title"]) <= 128
+        questions = [q for questions in spec["rounds"] for q in questions]
+        assert 1 <= len(questions) <= MAX_QUESTIONS
+        for text, options, correct in questions:
+            assert text and len(options) == 4 and len(set(options)) == 4
+            assert 0 <= correct < len(options) and all(len(o) <= 256 for o in options)
+
+
+def test_add_quizzes_adds_only_missing_ones(app):
+    from app.quiz_library import QUIZ_LIBRARY
+
+    runner = app.test_cli_runner()
+    assert runner.invoke(args=["add-quizzes", "--master", "host@example.com"]).exit_code == 0
+    with app.app_context():
+        master = QuizMaster.query.filter_by(username="host").one()
+        assert master.quizzes.count() == len(QUIZ_LIBRARY)  # General Knowledge was already there
+        assert not any(quiz.is_published for quiz in master.quizzes)
+    result = runner.invoke(args=["add-quizzes", "--master", "host@example.com"])
+    assert "already has every" in result.output
+    assert runner.invoke(args=["add-quizzes", "--master", "nobody@example.com"]).exit_code != 0
